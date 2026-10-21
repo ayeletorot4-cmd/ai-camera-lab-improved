@@ -125,8 +125,10 @@ class Measures(unittest.TestCase):
         m = tm.calculate_measures(k, np.array([400, 400]), home_pos=np.array([100, 400]))
         self.assertTrue(m['anticipation'])
         self.assertTrue(70 <= m['anticipation_ms'] <= 100, m['anticipation_ms'])
-        # Without a home position it can't be told
-        self.assertFalse(tm.calculate_measures(k, np.array([400, 400]))['anticipation'])
+        # Negative reaction time: the onset is the start of the reach, before the light
+        self.assertAlmostEqual(m['responsetime'], -m['anticipation_ms'] / 1000, places=6)
+        # It is told from the movement toward the target - no home position needed
+        self.assertTrue(tm.calculate_measures(k, np.array([400, 400]))['anticipation'])
 
     def test_3d(self):
         t = np.arange(int(2.5 * FPS)) / FPS
