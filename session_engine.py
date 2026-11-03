@@ -59,6 +59,11 @@ class _Prefetch:
     QUEUE = 3
 
     def __init__(self, cap, t_start, t_end, scale):
+        """Start the reading thread right away.
+
+        Inputs: cap - the open video; t_start, t_end - the part of the video to read (ms); scale - how much to
+        shrink the copy given to MediaPipe (e.g. 0.5 = half size; 1 = full size).
+        """
         self.cap, self.t_start, self.t_end, self.scale = cap, t_start, t_end, scale
         self.q = queue.Queue(self.QUEUE)
         self.stop = threading.Event()
@@ -67,6 +72,10 @@ class _Prefetch:
         self.thread.start()
 
     def _put(self, item):
+        """Hand one item to the reading side, waiting while the queue is full. Gives up if close() was called.
+
+        Input: item - a frame tuple, or None for "no more frames". Returns: True if handed over, False if stopped.
+        """
         while not self.stop.is_set():
             try:
                 self.q.put(item, timeout=0.2)
@@ -76,6 +85,9 @@ class _Prefetch:
         return False
 
     def _run(self):
+        """The reading thread: read frames from t_start to t_end and queue them (time, frame, RGB copy).
+        An error is kept in self.error and raised later on the reading side. Returns: nothing.
+        """
         try:
             cap, t_start, t_end = self.cap, self.t_start, self.t_end
             skip = 3 if t_start > 1000 else 0      # timestamps right after a jump are not reliable
@@ -102,6 +114,9 @@ class _Prefetch:
         self._put(None)
 
     def __iter__(self):
+        """Loop over the frames: `for t_ms, frame, rgb in prefetch:`. Ends when the part is done; if reading
+        failed, raises that error here.
+        """
         while True:
             item = self.q.get()
             if item is None:
@@ -111,11 +126,16 @@ class _Prefetch:
             yield item
 
     def close(self):
+        """Stop the reading thread and wait for it to finish (call this when done or cancelled)."""
         self.stop.set()
         self.thread.join()
 
 
 def cache_path(video_path, out_dir):
+    """The file name of a video's cache (its per-frame data): <out_dir>/<video name>_session.npz.
+
+    Inputs: video_path - the video; out_dir - the session folder. Returns: the cache file's path.
+    """
     return os.path.join(out_dir, os.path.splitext(os.path.basename(video_path))[0] + '_session.npz')
 
 
@@ -224,6 +244,7 @@ def process_video(video_path, boxes, out_dir, progress=None, should_stop=None, w
         stop_thread, errors = threading.Event(), []
 
         def run():
+            """With one worker the work runs in a thread (not a separate process); an error is saved for the caller."""
             try:
                 _process_range(jobs[0], stop_thread)
             except Exception as e:   # raised below, in the caller's thread
@@ -309,4 +330,8 @@ def _init_worker(counter):
 
 
 def _range_with_counter(job):
+    """Run one worker's part of the video (in a separate process), with the shared frame counter put back in.
+
+    Input: job - the worker's job tuple (see process_video). Returns: what _process_range returns.
+    """
     return _process_range(job[:5] + (_counter,) + job[6:])

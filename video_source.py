@@ -49,6 +49,10 @@ def chapters(path):
 
 
 def first_chapter(path):
+    """The first chapter of a GoPro clip (GoPro splits long recordings into several files, "chapters").
+
+    Input: path - any chapter of the clip (or a normal video). Returns: the path of the clip's first file.
+    """
     return chapters(path)[0]
 
 
@@ -83,6 +87,12 @@ class VideoSource:
     """cv2.VideoCapture-like reader over all chapters of a clip (or a single video)."""
 
     def __init__(self, path, hardware=True, chapter_paths=None, threads=0):
+        """Open a clip and collect each chapter's details (frames, frame rate, size, length).
+
+        Inputs: path - the video (any chapter of a GoPro clip); hardware - True to allow the graphics card's decoder
+        (only used if switched on, see hardware_decoding); chapter_paths - give the chapter files directly instead
+        of looking for them; threads - FFmpeg decoding threads (0 = OpenCV's default).
+        """
         self.paths = chapter_paths or chapters(path)
         self.hardware = hardware
         self.threads = threads
@@ -115,9 +125,15 @@ class VideoSource:
 
     # --- cv2.VideoCapture interface ---
     def isOpened(self):
+        """True if the video is open and can be read."""
         return self.cap is not None and self.cap.isOpened()
 
     def get(self, prop):
+        """Ask for a property of the whole clip, like OpenCV's VideoCapture.get().
+
+        Input: prop - e.g. cv2.CAP_PROP_FPS, cv2.CAP_PROP_FRAME_COUNT, cv2.CAP_PROP_POS_MSEC.
+        Returns: the value as a number. Frame count, time and position count over all chapters together.
+        """
         c = self.info[0] if self.info else {}
         if prop == cv2.CAP_PROP_FRAME_COUNT:
             return float(self.total_frames)
@@ -134,12 +150,21 @@ class VideoSource:
         return self.cap.get(prop) if self.cap is not None else 0.0
 
     def _open_chapter(self, k, hardware=None):
+        """Open chapter number k (closing the one that was open).
+
+        Inputs: k - chapter index (0 = first); hardware - None = use this reader's choice, False = force the normal
+        decoder. Returns: nothing.
+        """
         if self.cap is not None:
             self.cap.release()
         self.k = k
         self.cap, self.decoder = _open(self.paths[k], self.hardware if hardware is None else hardware, self.threads)
 
     def _next_chapter(self):
+        """Move on to the next chapter when the current one ends.
+
+        Returns: True if there is a next chapter and it opened, False at the end of the clip.
+        """
         if self.k + 1 >= len(self.paths):
             return False
         self._open_chapter(self.k + 1)
@@ -167,6 +192,11 @@ class VideoSource:
         return True
 
     def grab(self):
+        """Move to the next frame without decoding it into an image yet (fast). Goes on into the next chapter
+        by itself.
+
+        Returns: True if there was a frame, False at the end of the clip.
+        """
         while self.cap is not None:
             if self.cap.grab():
                 local_ms = self.cap.get(cv2.CAP_PROP_POS_MSEC)
@@ -185,14 +215,28 @@ class VideoSource:
         return False
 
     def retrieve(self):
+        """Decode the frame that grab() moved to.
+
+        Returns: (ok, frame) - ok is True if it worked; frame is the color image.
+        """
         return self.cap.retrieve()
 
     def read(self):
+        """Read the next frame (grab + retrieve).
+
+        Returns: (ok, frame) - (False, None) at the end of the clip.
+        """
         if not self.grab():
             return False, None
         return self.retrieve()
 
     def set(self, prop, value):
+        """Jump to a position in the clip, like OpenCV's VideoCapture.set().
+
+        Inputs: prop - cv2.CAP_PROP_POS_FRAMES (jump to a frame number) or cv2.CAP_PROP_POS_MSEC (jump to a time in
+        ms), counted over all chapters; value - where to jump. Other properties are passed to the open chapter.
+        Returns: True if the jump worked.
+        """
         if prop == cv2.CAP_PROP_POS_FRAMES:
             k = max(i for i, s in enumerate(self.start_frame) if s <= max(0, value)) if self.info else 0
             local = value - self.start_frame[k]
@@ -210,10 +254,15 @@ class VideoSource:
         return self.cap.set(prop, value)
 
     def _goto(self, k):
+        """Make sure chapter k is the open one (opens it only if another chapter is open).
+
+        Input: k - chapter index. Returns: nothing.
+        """
         if k != self.k:
             self._open_chapter(k)
 
     def release(self):
+        """Close the video file (call this when done reading)."""
         if self.cap is not None:
             self.cap.release()
 

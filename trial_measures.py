@@ -171,6 +171,12 @@ def start_place(start, home, target_pos, switch_pos):
 
 
 def nearest_switch(p, switch_pos, switch_size):
+    """Which switch a point is nearest to.
+
+    Inputs: p - a position (x, y or x, y, z); switch_pos - the switches' positions; switch_size - a switch's size
+    (distances are measured in switch sizes).
+    Returns: the switch number (1, 2, 3 ...).
+    """
     d = np.linalg.norm(switch_pos - p, axis=1) / switch_size
     return int(np.argmin(d)) + 1
 
@@ -260,6 +266,12 @@ TRIAL_COLUMNS = ['Part', 'Block', 'Sequence', 'Trial', 'Target', 'Limb', 'Side',
 
 
 def _cell(v):
+    """Make one value ready for a spreadsheet cell.
+
+    Input: v - any value (number, True/False, text, None).
+    Returns: '' for missing values (None / NaN), 1/0 for True/False, numbers rounded to 4 decimals, anything else
+    unchanged.
+    """
     if v is None or (isinstance(v, float) and np.isnan(v)):
         return ''
     if isinstance(v, (bool, np.bool_)):
@@ -286,6 +298,10 @@ def write_trials_csv(path, trials):
 
 
 def _iqr(x):
+    """The interquartile range (75th percentile minus 25th percentile), computed the same way as MATLAB's iqr.
+
+    Input: x - a list/array of numbers. Returns: the IQR, or NaN if x is empty.
+    """
     return np.percentile(x, 75, method='hazen') - np.percentile(x, 25, method='hazen') if len(x) else np.nan
 
 
@@ -328,6 +344,12 @@ MEASURE_COLUMNS = (['Subject', 'Session', 'Part', 'Block', 'Sequence', 'Trial', 
 
 
 def measure_row(subject, session, r):
+    """One row of the 'measures' sheet for one trial.
+
+    Inputs: subject - the subject's name/code; session - the session name; r - the trial row (from
+    measure_trials()).
+    Returns: a dict with the MEASURE_COLUMNS (part, block, trial, outcome, flags, all the measures, touse).
+    """
     return {'Subject': subject, 'Session': session, 'Part': r['Part'], 'Block': r['Block'],
             'Sequence': r['Sequence'], 'Trial': r['Trial'], 'Target': r['Target'], 'Outcome': r['Outcome'],
             'Light_source': r.get('Light_source', ''),
