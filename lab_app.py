@@ -288,26 +288,12 @@ class LabApp(QtWidgets.QMainWindow):
         self.l_videos.setWordWrap(True)
         self.l_videos.setTextFormat(Qt.RichText)
         f.addRow('', self.l_videos)
-        self.s_offset = QtWidgets.QDoubleSpinBox()
-        self.s_offset.setRange(-36000, 36000)
-        self.s_offset.setDecimals(4)
-        self.s_offset.setSuffix(' s')
-        b_tc = QtWidgets.QPushButton('From timecode')
-        b_tc.setToolTip('GoPro cameras synced in the Quik app (Sync Timecode): the offset from the start timecodes')
-        b_tc.clicked.connect(lambda: self.auto_offset(force=True))
-        b_snd = QtWidgets.QPushButton('From the sound')
-        b_snd.clicked.connect(self.find_offset)
-        row = QtWidgets.QHBoxLayout()
-        row.addWidget(self.s_offset)
-        row.addWidget(b_tc)
-        row.addWidget(b_snd)
-        row.addWidget(QtWidgets.QLabel('seconds into video A at which video B started'))
-        row.addStretch()
-        f.addRow('Sync offset', row)
         self.l_sync = QtWidgets.QLabel()
         self.l_sync.setWordWrap(True)
         self.l_sync.setTextFormat(Qt.RichText)
-        f.addRow('', self.l_sync)
+        self.l_sync.setToolTip('GoPro cameras synced in the Quik app (Timecode Sync): the videos are lined up by the '
+                               'start time each camera wrote into its file')
+        f.addRow('Sync', self.l_sync)
         self.e_calib = QtWidgets.QLineEdit()
         b_board = QtWidgets.QPushButton('Board calibration…')
         b_board.setToolTip('The printed ChArUco board filmed by both cameras (start of the session, or separate clips)')
@@ -423,68 +409,46 @@ class LabApp(QtWidgets.QMainWindow):
             info[cam] = c
             names = ', '.join(os.path.basename(p) for p in src.paths)
             length = f'{src.total_ms / 60000:.1f} min' if src.total_ms >= 60000 else f'{src.total_ms / 1000:.1f} s'
-            text = (f'<b>{cam}</b>: {c["width"]}x{c["height"]}, {c["fps"]:.3f} fps, {length}'
+            fmt = vs.video_format(src.paths[0])
+            codec = (f', {fmt["codec"].upper()}{" 10-bit" if fmt["ten_bit"] else ""}'
+                     if fmt and fmt['codec'] in ('hevc', 'h264') else '')
+            text = (f'<b>{cam}</b>: {c["width"]}x{c["height"]}, {c["fps"]:.3f} fps{codec}, {length}'
                     + (f' - {len(src.paths)} chapters ({names})' if len(src.paths) > 1 else ''))
             warn = src.check() + timecode.chapter_gaps(path)
             if warn:
                 text += '<br><span style="color:#b00">' + '<br>'.join(warn) + '</span>'
+            notes = vs.camera_notes(c, fmt)
+            if notes:
+                text += '<br><span style="color:#a60">' + '<br>'.join(notes) + '</span>'
             lines.append(text)
         if len(info) == 2:
             a, b = info['A'], info['B']
             if (a['width'], a['height']) != (b['width'], b['height']) or abs(a['fps'] - b['fps']) > 0.01:
                 lines.append('<span style="color:#b00">The two videos differ in resolution or frame rate - record both '
-                             'cameras with the same settings (4K, 60 fps, Linear, HyperSmooth off).</span>')
+                             'cameras with the same settings (resolution, frame rate, lens Linear, HyperSmooth off).</span>')
         self.l_videos.setText('<br>'.join(lines))
 
-    def auto_offset(self, force=False):
-        """Both videos chosen: the offset from the GoPro timecodes, and from the sound as a cross-check."""
+    def auto_offset(self):
+        """Both videos chosen: line them up by the start timecodes the GoPros wrote (cameras synced in Quik)."""
         import timecode
         a, b = self.e_cam_a.text().strip(), self.e_cam_b.text().strip()
         if not (a and b and os.path.exists(a) and os.path.exists(b)):
+            self.l_sync.setText('' if not b else self.l_sync.text())
             return
         try:
             off, ta, tb = timecode.timecode_offset(a, b)
         except Exception as e:
-            if force:
-                self.error(f'Could not get the offset from the timecodes:\n{e}')
             first = str(e).splitlines()[0].replace(os.path.dirname(a) + os.sep, '').replace(os.path.dirname(b) + os.sep, '')
-            self.l_sync.setText(f'No timecode offset ({first}) - use "From the sound" or type it in.')
+            self.l_sync.setText(f'<span style="color:#b00"><b>The videos can\'t be lined up:</b> {first}<br>Sync both '
+                                'cameras in the GoPro Quik app (Timecode Sync) before recording.</span>')
             return
-        self.s_offset.setValue(off)
-        fps = ta['fps']
-        note = '' if ta['source'] == 'ffprobe' else ' (read from the files - ffprobe not installed)'
+        self.state['offset_s'] = off
+        note = '' if ta['source'] == 'ffprobe' else ' (read from the files)'
+        later = 'B' if off >= 0 else 'A'
         self.l_sync.setText(f'From the timecodes{note}: A starts {ta["timecode"]}, B starts {tb["timecode"]} '
-                            f'→ offset {off:+.4f} s. Checking against the sound…')
-        self.form_to_state()
-        self.save()
-        import sync_videos
-        if sync_videos.audio_tool() is None:
-            self.l_sync.setText(self.l_sync.text().replace('Checking against the sound…',
-                                                           '(sound check needs ffmpeg or macOS)'))
-            return
-
-        def job(progress, stop):
-            import sync_videos
-            return sync_videos.audio_offset(a, b)
-
-        def done(r):
-            snd, conf = r
-            diff = abs(snd - off) * fps
-            base = self.l_sync.text().replace(' Checking against the sound…', '')
-            if conf < 1.5:
-                msg = f' Sound: {snd:+.4f} s, but the sound match is unclear - not used as a check.'
-            elif diff > 1:
-                msg = (f'<br><span style="color:#b00"><b>Warning:</b> the sound gives {snd:+.4f} s, '
-                       f'{diff:.1f} frames from the timecode offset - check the cameras\' timecode sync.</span>')
-            else:
-                msg = f' <span style="color:#080">Sound agrees: {snd:+.4f} s ({diff:.2f} frames apart).</span>'
-            self.l_sync.setText(base + msg)
-
-        self.sync_worker = Worker(job)
-        self.sync_worker.done.connect(done)
-        self.sync_worker.failed.connect(lambda m: self.l_sync.setText(
-            self.l_sync.text().replace('Checking against the sound…', f'(sound check failed: {m})')))
-        self.sync_worker.start()
+                            f'→ camera {later} started {abs(off):.3f} s later.')
+        if self.e_subject.text().strip():
+            self.save()
 
     def state_to_form(self):
         s = self.state
@@ -492,7 +456,6 @@ class LabApp(QtWidgets.QMainWindow):
         self.c_session.setCurrentIndex(0 if s['session'] == 'd1' else 1)
         self.e_cam_a.setText(s['cam_a'])
         self.e_cam_b.setText(s.get('cam_b') or '')
-        self.s_offset.setValue(s.get('offset_s') or 0)
         self.e_calib.setText(s.get('calibration') or '')
         d = s['design']
         self.c_tested.setCurrentText(d['tested_side'])
@@ -509,6 +472,7 @@ class LabApp(QtWidgets.QMainWindow):
         self.l_sync.clear()
         try:
             self.describe_videos()
+            self.auto_offset()
         except Exception as e:   # a video that moved etc. - shown, not fatal
             self.l_videos.setText(f'<span style="color:#b00">{e}</span>')
 
@@ -523,7 +487,8 @@ class LabApp(QtWidgets.QMainWindow):
             s['boxes_a'] = None
         if s['cam_b'] != old_b:
             s['boxes_b'] = None
-        s['offset_s'] = self.s_offset.value()
+        if not s['cam_b']:
+            s['offset_s'] = 0.0
         s['calibration'] = self.e_calib.text().strip()
         s['design'] = dict(tested_side=self.c_tested.currentText(), contralateral=self.k_contra.isChecked(),
                            practice_limb=self.c_plimb.currentText(), practice_side=self.c_pside.currentText(),
@@ -565,27 +530,23 @@ class LabApp(QtWidgets.QMainWindow):
         self.session = None
         self.state_to_form()
 
-    def find_offset(self):
-        self.form_to_state()
-        if not (self.state['cam_a'] and self.state['cam_b']):
-            self.error('Choose both videos first.')
-            return
-        import sync_videos
-        if sync_videos.audio_tool() is None:
-            self.error(sync_videos.NO_AUDIO_TOOL)
-            return
+    def sync_missing(self):
+        """Camera B chosen but the two videos can't be lined up by their timecodes: tell the user, True."""
+        b = self.state.get('cam_b')
+        if not b:
+            return False
+        import timecode
         try:
-            off, conf = sync_videos.audio_offset(self.state['cam_a'], self.state['cam_b'])
+            self.state['offset_s'] = timecode.timecode_offset(self.state['cam_a'], b)[0]
+            return False
         except Exception as e:
-            self.error(f'Could not read the sound: {e}')
-            return
-        self.s_offset.setValue(off)
-        self.info(f'Offset {off:+.3f} s (match {conf:.1f}x the next best' +
-                  (' - unclear, check it' if conf < 1.5 else '') + ')')
+            self.error(f'The two videos can\'t be lined up by their timecodes:\n{e}\n\nSync both cameras in the GoPro '
+                       'Quik app (Timecode Sync) before recording, or remove camera B.')
+            return True
 
     def board_calibration(self):
         self.form_to_state()
-        if not self.save():
+        if self.sync_missing() or not self.save():
             return
         dlg = BoardCalibrationDialog(self, self.state)
         dlg.exec()
@@ -597,9 +558,9 @@ class LabApp(QtWidgets.QMainWindow):
     def click_calibration(self):
         self.form_to_state()
         if not (self.state['cam_a'] and self.state['cam_b']):
-            self.error('Choose both videos (and the sync offset) first.')
+            self.error('Choose both videos first.')
             return
-        if not self.save():
+        if self.sync_missing() or not self.save():
             return
         dlg = CalibrationDialog(self, self.state)
         if dlg.exec() and dlg.saved_path:
@@ -789,7 +750,8 @@ class LabApp(QtWidgets.QMainWindow):
         self.l_proc.setText('<br>'.join(lines) or 'Choose the video(s) on the Session page first.')
 
     def process(self):
-        if not self.save():
+        self.form_to_state()
+        if self.sync_missing() or not self.save():
             return
         todo = []
         for cam in ('a', 'b'):
@@ -1238,18 +1200,7 @@ class BoardCalibrationDialog(QtWidgets.QDialog):
         self.e_ca, self.e_cb = QtWidgets.QLineEdit(), QtWidgets.QLineEdit()
         f.addRow('   Clip camera A', path_row(self.e_ca, lambda: self.browse(self.e_ca)))
         f.addRow('   Clip camera B', path_row(self.e_cb, lambda: self.browse(self.e_cb)))
-        self.s_off = QtWidgets.QDoubleSpinBox()
-        self.s_off.setRange(-36000, 36000)
-        self.s_off.setDecimals(4)
-        self.s_off.setSuffix(' s')
-        b_tc = QtWidgets.QPushButton('From timecode')
-        b_tc.clicked.connect(self.clip_offset)
-        orow = QtWidgets.QHBoxLayout()
-        orow.addWidget(self.s_off)
-        orow.addWidget(b_tc)
-        orow.addWidget(QtWidgets.QLabel('seconds into clip A at which clip B started'))
-        orow.addStretch()
-        f.addRow('   Clip offset', orow)
+        f.addRow('', QtWidgets.QLabel('   (the clips are lined up by their timecodes)'))
         self.s_sq = QtWidgets.QDoubleSpinBox()
         self.s_sq.setRange(10, 100)
         self.s_sq.setDecimals(1)
@@ -1288,15 +1239,6 @@ class BoardCalibrationDialog(QtWidgets.QDialog):
         if p:
             edit.setText(vs.first_chapter(p))
 
-    def clip_offset(self):
-        import timecode
-        try:
-            off, ta, tb = timecode.timecode_offset(self.e_ca.text().strip(), self.e_cb.text().strip())
-            self.s_off.setValue(off)
-            self.out.setPlainText(f"Clip offset from the timecodes: {off:+.4f} s (A {ta['timecode']}, B {tb['timecode']})")
-        except Exception as e:
-            self.out.setPlainText(f'Could not read the timecodes: {e}')
-
     def run(self):
         if self.worker is not None and self.worker.isRunning():
             return
@@ -1304,11 +1246,18 @@ class BoardCalibrationDialog(QtWidgets.QDialog):
             a, b, off = self.state['cam_a'], self.state.get('cam_b'), self.state.get('offset_s', 0.0)
             start, length = self.s_start.value(), self.s_len.value()
         else:
-            a, b, off = self.e_ca.text().strip(), self.e_cb.text().strip(), self.s_off.value()
+            a, b = self.e_ca.text().strip(), self.e_cb.text().strip()
             start, length = 0.0, 0.0
         if not (a and b and os.path.exists(a) and os.path.exists(b)):
             self.out.setPlainText('Choose both videos first (Session step, or the clips here).')
             return
+        if not self.r_session.isChecked():
+            import timecode
+            try:
+                off = timecode.timecode_offset(a, b)[0]
+            except Exception as e:
+                self.out.setPlainText(f'Could not line up the clips by their timecodes: {e}')
+                return
         sq, ps = self.s_sq.value(), self.s_ps.value()
         self.out.setPlainText(f'Looking for the board in {os.path.basename(a)} and {os.path.basename(b)} '
                               f'(offset {off:+.4f} s)...')

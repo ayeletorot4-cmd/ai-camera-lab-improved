@@ -21,7 +21,7 @@ The videos are not in git (too big); the 10 raw lab videos (IMG_0119-0123, IMG_7
 ```
 gh release download lab-videos -R ofir-code/ai-camera-lab -D media
 ```
-(or download them from the repo's Releases page). The synced videos (`media/synced/`) and everything in `outputs/` can be made again from them with the scripts; the sync offsets are kept in `media/synced/*.json`.
+(or download them from the repo's Releases page). Everything in `outputs/` can be made again from them with the scripts.
 
 ## Switch events
 The first time for each video, the switches are **found automatically**: one pass over the video (about a minute for a 30 s 4K video) looks for the black boxes with a red button whose pink light turns on during the video. The first frame then shows them numbered **1 to 5 from the subject's RIGHT to LEFT** (the numbering follows the arc of switches; the subject faces its middle). Check them and press:
@@ -73,6 +73,10 @@ A window app for whole experiment sessions: double-click **`Lab App.command`** (
 
 ## Two GoPro cameras (recommended setup)
 **Camera settings** - the same on both cameras: GoPro HERO13 Black, **4K, 60 fps, lens Linear, HyperSmooth (stabilization) OFF**, on fixed mounts (don't move them during the day - then one calibration serves every recording of that day).
+- **Frame rate in Israel**: GoPro's "60 fps" is really 59.94 fps (Anti-Flicker 60 Hz). Mains power here is 50 Hz, so room lights flicker at 100 Hz; with **Anti-Flicker 50 Hz** the camera records **50 fps** (or 100 / 200), which avoids the flicker and gives a whole frame rate, so the timecode offset is exact. At 59.94 fps the timecode can be read as frames or as clock time (0.1 % apart, e.g. 30 ms for a 30 s offset).
+- **Bit depth 8-bit** ("10-bit color" off): 10-bit HEVC decodes more slowly and the app uses 8 bits anyway. Codec HEVC (`GX` files) or H.264 (`GH` files) both work.
+- The app shows each video's resolution, frame rate and codec, and a note when these settings are not as above.
+- The timecode sync holds as long as the camera's clock runs; the clocks of two cameras drift apart slowly, so sync again at the start of each recording day and after a battery has been taken out.
 
 **The board** - `venv/bin/python calibrate_cameras.py make-board` writes `outputs/charuco_board.pdf` (exact A4 scale) and `charuco_board.png`: a ChArUco board of 5 x 7 squares, 38 mm, `DICT_4X4_50` markers. Print the PDF **at 100% / Actual size** (not "fit to page"), check the 100 mm bar and one square with a ruler (38 mm; note the measured size), and glue it to something flat and stiff.
 
@@ -80,7 +84,7 @@ A window app for whole experiment sessions: double-click **`Lab App.command`** (
 1. **Sync the timecode**: in the GoPro Quik app, *Sync Timecode* (both cameras scan the QR code). Then each camera can start / stop on its own - the timecode tells how the files line up.
 2. **Record**: start both cameras; hold the board where both see it and slowly tilt / turn / move it around the subject's area for ~20-30 s; then run the experiment.
 3. **App → Session**: choose each camera's video - the **first chapter** (`GX01xxxx.MP4`). GoPro splits long recordings into ~4 GB chapters (`GX010123.MP4`, `GX020123.MP4`, ...); the following chapters of the same clip are found automatically and used as one continuous video (the app shows them and warns if they don't follow each other).
-4. **Offset**: filled in automatically from the start timecodes (*From timecode*), and checked against the sound (warning if they differ by more than one frame; on Windows the sound is read with `ffmpeg`, which must be installed and on PATH - see below). Offset = seconds into video A at which video B started.
+4. **Sync**: automatic - the app reads the start timecode each camera wrote into its file and lines the videos up (it shows which camera started later and by how much). Nothing to type or press. A video without a timecode (camera not synced in Quik) can't be used as a second camera: the app says so in red.
 5. **Board calibration…**: source = the session videos (time window; default the first 60 s) or separate calibration clips; enter the measured square size. It shows the frames with the board in A / B / both, each lens' fit error, the stereo fit error, the distance between the cameras and a check (the board's squares measured from the 3D result vs the entered size, and the reprojection error) - **PASS** or warnings (e.g. fewer than 20 frames seen by both, stereo error > 1 px). The result is saved with the session and used as its calibration. *Use an earlier calibration…* re-uses the file of an earlier recording of the same day (cameras not moved).
 6. **Switches → Process → Blocks & parts → Trials → Export** as before.
 
@@ -88,16 +92,12 @@ The timecode is read with `ffprobe` (FFmpeg) if installed - on a Mac `brew insta
 
 Command line: `venv/bin/python calibrate_cameras.py board GX010123.MP4 GX010456.MP4 [--offset S] [--start S] [--seconds 60] [--square-mm 38]` (offset from the timecodes if not given).
 
-**Tests**: `venv/bin/python -m unittest discover -s tests -v` (timecodes incl. drop-frame and 59.94, the offset's sign, chapters, pairing of board frames with an offset, the printed board).
+**Tests**: `venv/bin/python -m unittest discover -s tests -v` (timecodes incl. drop-frame and 59.94, the offset's sign, chapters, HERO13 files (HEVC 10-bit, 50 fps), pairing of board frames with an offset, the printed board).
 
 ## Two cameras (3D)
 Two cameras filming the same session from different angles give each joint's position in 3D, which fixes what one camera can't see (depth, a joint hidden behind the body, angles distorted by perspective). Three steps, on a Mac, from this folder:
 
-**1. Sync the videos** (not needed for timecode-synced GoPros: the app takes the offset from the timecodes - see above):
-```
-venv/bin/python sync_videos.py media/IMG_0122.mov media/IMG_7557.mov
-```
-Finds the time offset from the sound and writes both videos cut to the common part, frame-by-frame in sync (to within half a frame), to `media/synced/` (`<video>_synced.mp4` + a .json with the offset). If the sound match is unclear, give the offset yourself: `--offset 1.838` (seconds into video A at which video B started). Already done for IMG_0122+IMG_7557 (offset 1.838 s) and IMG_0123+IMG_7558 (0.648 s); both offsets were checked against the switch lights seen by both cameras (agree within 1 ms).
+**1. Videos in sync**: the command-line scripts below need two videos that start at the same frame. (The Lab App does 3D on GoPro videos synced in Quik without this - it lines them up by their timecodes; that is the way to use.)
 
 **2. Calibrate the cameras** (where camera B is relative to camera A, and their lenses) - one of:
 - **Printed board** (best; for a fixed setup - in the app: *Board calibration…*): print `outputs/charuco_board.pdf` on A4 at 100% (each square 38 mm - measure it), glue it to something flat. At the start of the session, with both cameras recording, hold it where both cameras see it and slowly tilt/turn/move it around the subject's area for ~20 s. Then

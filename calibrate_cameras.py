@@ -21,7 +21,7 @@ Two ways:
       table top give a much better result. At least 8 points, spread over the scene. Units are relative (distance between the cameras = 1)
       unless you give a known distance: --known 1 5 52.0 = points 1 and 5 are 52.0 cm apart.
 
-The videos must be in sync (sync_videos.py). Output: outputs/<A>+<B>_cameras.json
+The videos must start at the same moment (the Lab App lines GoPro videos up by their timecodes). Output: outputs/<A>+<B>_cameras.json
 """
 import argparse
 import json

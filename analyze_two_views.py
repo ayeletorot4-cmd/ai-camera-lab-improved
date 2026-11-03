@@ -1,7 +1,7 @@
 """Track one limb in 3D from two synchronised videos of the same session (two camera angles).
 
-Both videos must be in sync frame by frame (frame i of A taken at the same moment as frame i of B): use
-sync_videos.py first, or cameras with a shared timecode. Steps:
+Both videos must be in sync frame by frame (frame i of A taken at the same moment as frame i of B), i.e. cut to
+the same start. (The Lab App does 3D on GoPro videos without cutting: it lines them up by their timecodes.) Steps:
   1. MediaPipe Holistic on every frame of both videos (cached in outputs/, so re-runs skip this step).
   2. The camera geometry (lens settings and where camera B is relative to camera A) is read from the file made
      by calibrate_cameras.py (printed board, or clicked matching points).
