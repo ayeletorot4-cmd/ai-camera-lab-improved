@@ -176,13 +176,6 @@ class ChapterGaps(unittest.TestCase):
 class Hero13(unittest.TestCase):
     """GoPro HERO13 Black specifics: 59.94 / 50 fps timecode readings, chapter continuity, HEVC 10-bit, names."""
 
-    def test_clock_reading_offset(self):
-        a = dict(fps=60000 / 1001, drop=False)
-        self.assertAlmostEqual(tc.clock_reading_offset(60.0, a), 60.0 * (60000 / 1001) / 60)   # 59.94 s: 0.1 % less
-        self.assertIsNone(tc.clock_reading_offset(60.0, dict(fps=50.0, drop=False)))        # Anti-Flicker 50 Hz
-        self.assertIsNone(tc.clock_reading_offset(60.0, dict(fps=60.0, drop=False)))
-        self.assertIsNone(tc.clock_reading_offset(60.0, dict(fps=60000 / 1001, drop=True)))  # drop-frame = clock
-
     def _chapters_5994(self, step):
         d = tempfile.mkdtemp()
         a, b = os.path.join(d, 'GX010008.MP4'), os.path.join(d, 'GX020008.MP4')

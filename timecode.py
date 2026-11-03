@@ -14,8 +14,7 @@ A timecode HH:MM:SS:FF (non-drop) or HH:MM:SS;FF (drop-frame) counts frames at t
 Which clock does the counter follow? With a whole frame rate (50, 25, 100 fps: Anti-Flicker 50 Hz) the frame
 counter and the clock agree, so the offset is exact. With 59.94 / 29.97 fps a non-drop timecode can be read two
 ways: frames of 1/59.94 s (the default here: frame counter -> seconds) or clock time (HH:MM:SS + FF/60). The two
-readings of an offset differ by 0.1 % (6 ms for a 6 s offset, 60 ms for 60 s): clock_reading_offset() gives the
-other reading, and the app keeps the one the sound agrees with.
+readings of an offset differ by 0.1 % (6 ms for a 6 s offset, 60 ms for 60 s) - so record at 50 fps.
 
 Reading: ffprobe (part of FFmpeg) if installed - the 'timecode' tag of the tmcd stream or of the file; else
 the timecode track is read straight from the MP4/MOV file (built-in, no FFmpeg needed).
@@ -230,16 +229,6 @@ def timecode_offset(path_a, path_b):
     elif off < -12 * 3600:
         off += 24 * 3600
     return off, a, b
-
-
-def clock_reading_offset(off, a):
-    """The offset with the timecode read as clock time instead of frames (see the top of this file), or None when
-    both readings agree (a whole frame rate, or drop-frame timecode, which keeps up with the clock)."""
-    fps = a.get('fps') or 0
-    rate = nominal_rate(fps) if fps else 0
-    if not fps or a.get('drop') or abs(fps - rate) < 1e-3:
-        return None
-    return off * fps / rate
 
 
 def chapter_gaps(path):
