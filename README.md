@@ -1,50 +1,13 @@
-# MediaPipe Limb Tracker ("only visuals" copy)
+# Reaching Lab
 
-Tracks **one limb** in a lab video with MediaPipe Holistic. The whole frame is analyzed, but only the chosen limb is saved and drawn. Optionally also detects **switch events** (light on / touch / light off) for the 5 switches on the table.
-
-## Quick start
-1. Double-click **`Run Kinematics.bat`** (Windows) or **`Run Kinematics.command`** (Mac) and pick the video (on Mac the dialog opens in `media/`; on Windows, in the folder above this one).
-2. Type **U** (upper limb) or **L** (lower limb).
-3. Type **L** or **R** for the subject's own **left** or **right** side.
-4. Type **Y** to detect switch events, or press ENTER to skip (see below).
-5. Watch the preview. Press `Esc` or close the window to stop early. (Typing elsewhere while the preview is in front goes to the preview, so letters don't stop it.)
-
-| Limb | Points tracked |
-|---|---|
-| upper | shoulder, elbow, wrist + 21 hand/finger points (red cross = wrist from the hand model) |
-| lower | hip, knee, ankle, heel, toe (red cross = ankle) |
-
-Colours: subject's left side = orange, right side = cyan.
+A window app for whole reaching-task experiment sessions filmed with one or two cameras (two GoPro HERO13 recommended): MediaPipe tracks the upper or lower limb, the 5 switches on the table and their lights are found in the video, every light becomes a trial synced with the experiment design, and the measures (RT, MT, ...) are written to CSV and Excel, the same method as the previous MATLAB system.
 
 ## Videos
 The videos are not in git (too big); the 10 raw lab videos (IMG_0119-0123, IMG_7554-7558, ~300 MB each) are files of the GitHub release **lab-videos** of this (private) repo. To get them into `media/`:
 ```
 gh release download lab-videos -R ofir-code/ai-camera-lab -D media
 ```
-(or download them from the repo's Releases page). Everything in `outputs/` can be made again from them with the scripts.
-
-## Switch events
-The first time for each video, the switches are **found automatically**: one pass over the video (about a minute for a 30 s 4K video) looks for the black boxes with a red button whose pink light turns on during the video. The first frame then shows them numbered **1 to 5 from the subject's RIGHT to LEFT** (the numbering follows the arc of switches; the subject faces its middle). Check them and press:
-
-| Key | |
-|---|---|
-| ENTER | OK (when all 5 are found) |
-| F | flip the numbering (1 to 5 the other way round) |
-| 1-5 | redraw that switch's box (drag, then ENTER) |
-| A | add a switch that was not found (e.g. hidden by the subject in IMG_7554) |
-| M | mark all 5 by hand: drag a box around each switch in order 1 to 5, ENTER after each |
-| C | continue without switch events |
-
-A box should include the switch's light. The boxes are saved in `outputs/switch_settings.json` and offered again next time for the same video name (type R in the launcher to find them again). Boxes for IMG_0120 and IMG_0123 are already saved.
-
-For each switch:
-- **Start** - the light turns on.
-- **Touching** - the first frame a hand/finger point (upper limb: either hand) or foot point (lower limb: either foot) is inside the box or within 25% of the box size from it, from light start until 1 s after the light turns off. (The button sticks out on the subject's side, so fingertips pressing it sit at the edge of the box.)
-- **Turn off** - the light turns off.
-
-How the light is measured: the pink LED light and its glow inside the box enlarged by 25% (the deep-red button, white table and skin are left out), minus its slowly changing background. The boxes follow camera movement automatically. A light partly hidden by the hand or foot still counts as on. A switch whose light stays on the whole video (e.g. IMG_0119, IMG_7554) has no light events.
-
-Pressing the button turns the light off, so Touching is usually 0-3 frames (0-50 ms) before Turn off. An empty cell means unknown: the light was already on when the video started (no Start), was still on when it ended (no Turn off), no touch was found, or (a row with only the switch number) that switch had no light events. Times are video time in ms; at 60 fps they are accurate to one frame (~17 ms).
+(or download them from the repo's Releases page). These are phone videos from before the GoPros: one camera each in the Lab App.
 
 ## Reaching Lab app (experiment sessions)
 A window app for whole experiment sessions: double-click **`Lab App.command`** (Mac) or **`Lab App.bat`** (Windows), or run `venv/bin/python lab_app.py`. Six steps on the left:
@@ -71,6 +34,10 @@ A window app for whole experiment sessions: double-click **`Lab App.command`** (
 
 `results/` holds participant data and is not uploaded to git.
 
+**How the switch lights are measured.** The pink LED light and its glow inside the box enlarged by 25% (the deep-red button, white table and skin are left out), minus its slowly changing background. The boxes follow camera movement automatically. A light partly hidden by the hand or foot still counts as on. A switch whose light stays on the whole video (e.g. IMG_0119, IMG_7554) has no light events.
+
+Pressing the button turns the light off, so the touch is usually 0-3 frames (0-50 ms) before the light goes off. Times are video time in ms; at 60 fps they are accurate to one frame (~17 ms).
+
 ## Two GoPro cameras (recommended setup)
 **Camera settings** - the same on both cameras: GoPro HERO13 Black, **4K, 60 fps, lens Linear, HyperSmooth (stabilization) OFF**, on fixed mounts (don't move them during the day - then one calibration serves every recording of that day).
 - **Frame rate in Israel**: GoPro's "60 fps" is really 59.94 fps (Anti-Flicker 60 Hz). Mains power here is 50 Hz, so room lights flicker at 100 Hz; with **Anti-Flicker 50 Hz** the camera records **50 fps** (or 100 / 200), which avoids the flicker and gives a whole frame rate, so the timecode offset is exact. At 59.94 fps the timecode can be read as frames or as clock time (0.1 % apart, e.g. 30 ms for a 30 s offset).
@@ -90,52 +57,16 @@ A window app for whole experiment sessions: double-click **`Lab App.command`** (
 
 The timecode is read with `ffprobe` (FFmpeg) if installed - on a Mac `brew install ffmpeg` (Homebrew: https://brew.sh); on Windows from https://ffmpeg.org/download.html, added to PATH - otherwise straight from the MP4's timecode track (no FFmpeg needed). Timecodes HH:MM:SS:FF and drop-frame HH:MM:SS;FF are converted with the file's real frame rate (e.g. 59.94).
 
-Command line: `venv/bin/python calibrate_cameras.py board GX010123.MP4 GX010456.MP4 [--offset S] [--start S] [--seconds 60] [--square-mm 38]` (offset from the timecodes if not given).
-
 **Tests**: `venv/bin/python -m unittest discover -s tests -v` (timecodes incl. drop-frame and 59.94, the offset's sign, chapters, HERO13 files (HEVC 10-bit, 50 fps), pairing of board frames with an offset, the printed board).
-
-## Two cameras (3D)
-Two cameras filming the same session from different angles give each joint's position in 3D, which fixes what one camera can't see (depth, a joint hidden behind the body, angles distorted by perspective). Three steps, on a Mac, from this folder:
-
-**1. Videos in sync**: the command-line scripts below need two videos that start at the same frame. (The Lab App does 3D on GoPro videos synced in Quik without this - it lines them up by their timecodes; that is the way to use.)
-
-**2. Calibrate the cameras** (where camera B is relative to camera A, and their lenses) - one of:
-- **Printed board** (best; for a fixed setup - in the app: *Board calibration…*): print `outputs/charuco_board.pdf` on A4 at 100% (each square 38 mm - measure it), glue it to something flat. At the start of the session, with both cameras recording, hold it where both cameras see it and slowly tilt/turn/move it around the subject's area for ~20 s. Then
-  `venv/bin/python calibrate_cameras.py board VIDEO_A VIDEO_B [--square-mm 38] [--offset S]` (frames of the two videos are paired by time with the offset) - gives real units (cm) and each lens' distortion. Cameras on fixed mounts: one calibration serves the whole session. GoPro: use the "Linear" lens setting. (`calibrate_cameras.py make-board` makes the board image again.)
-- **Clicks** (existing videos without a board):
-  `venv/bin/python calibrate_cameras.py clicks media/synced/IMG_0122_synced.mp4 media/synced/IMG_7557_synced.mp4`
-  Both first frames open side by side; click the same point in A (left), then in B (right), at least 8 times (more is better; 20+ also corrects the lens focal length). Use the magnifier. Good points: the centres of the red switch buttons, corners of the white labels, table corners, and the subject in that first frame (knuckle, ring, elbow tip) - points that are not all on the table top. U = undo, ENTER = done. The clicks are saved (`--again` to redo). Add `--known 1 3 45.5` if you know the real distance between two clicked points (here points 1 and 3, 45.5 cm) to get cm.
-
-**3. Analyze:**
-```
-venv/bin/python analyze_two_views.py media/synced/IMG_0122_synced.mp4 media/synced/IMG_7557_synced.mp4 --limb upper --side right
-```
-Outputs in `outputs/`: `<A>+<B>_<limb>_<side>_3d.csv` (per frame: each joint's 3D position, how well it fits both views in px, its position in each view; joint angles in 3D - elbow and shoulder, or knee, hip and ankle - and the same angles measured in 2D in each view, for comparison) `..._switch_events.csv` (the 3 switch events - Start, Touching, Turn off - per light event, like the one-camera file, but the lights are measured by both cameras and Touching needs the hand on the switch in both views, so a hand passing in front of a switch in one view doesn't count; times are ms of the synced videos) and `..._3d.mp4` (both views side by side: grey = MediaPipe in that view alone, coloured = the 3D result drawn back into each view). A joint is in 3D only on frames where both cameras see it; frames where the two views disagree (e.g. MediaPipe mixed up left and right in one view) are left empty. MediaPipe's results are cached per video (`*_mediapipe_cache.npz`), so re-running after a new calibration takes a few minutes.
 
 Tip for the camera placement: MediaPipe works best when it sees the person roughly from the front or side, upright. A camera straight above (like IMG_012x) sees the arm well but guesses hips/legs under the table.
 
-## Outputs (`outputs\`)
-- `<video>_<limb>_<side>_landmarks.csv` - per frame: `<joint>_x_px`, `_y_px`, `_z_rel`, `_visibility` for the limb joints, plus `hand_<point>_x_px`, `_y_px`, `_z_rel` for the 21 hand points (upper limb). Coordinates are pixels in the full frame. Empty cells = not detected in that frame.
-- `<video>_<limb>_<side>_skeleton.mp4` - the whole original video (full resolution) with the limb skeleton drawn on it.
-- `<video>_<limb>_<side>_switch_events.csv` (with switch events) - one row per light event: `Switch`, `Start_ms`, `Touching_ms`, `Turn_off_ms` (video time in ms), sorted by switch.
-
-A timestamp is added to a name if that file already exists, so nothing is overwritten. If you stop early, all files contain the frames processed so far.
-
-From a terminal (uses the venv in the main folder):
-```
-..\venv\Scripts\python.exe extract_kinematics.py "path\to\video.mov" --limb upper|lower --side left|right [--switches] [--select-switches]
-```
-On a Mac (uses `venv` in this folder):
-```
-venv/bin/python extract_kinematics.py "path/to/video.mov" --limb upper|lower --side left|right [--switches] [--select-switches]
-```
-
 ## Setup on macOS
-The script uses MediaPipe's older `solutions` API, which only exists up to MediaPipe 0.10.21, and that version needs **Python 3.12 or older** (newer MediaPipe for Python 3.13+ no longer has it). To (re)create the environment in this folder:
+The app uses MediaPipe's older `solutions` API, which only exists up to MediaPipe 0.10.21, and that version needs **Python 3.12 or older** (newer MediaPipe for Python 3.13+ no longer has it). To (re)create the environment in this folder:
 ```
 python3 -m pip install --user uv
 ~/Library/Python/3.13/bin/uv python install 3.12
 ~/Library/Python/3.13/bin/uv venv --seed -p 3.12 venv
 venv/bin/pip install -r requirements.txt
 ```
-(Adjust `3.13` in the uv path to your `python3 --version`.) The first time you double-click `Run Kinematics.command`, macOS may ask to allow Terminal to run it; if it says the file can't be opened, right-click it → Open.
+(Adjust `3.13` in the uv path to your `python3 --version`.) The first time you double-click `Lab App.command`, macOS may ask to allow Terminal to run it; if it says the file can't be opened, right-click it → Open.
