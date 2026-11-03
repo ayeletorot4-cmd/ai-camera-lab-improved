@@ -423,17 +423,23 @@ class LabApp(QtWidgets.QMainWindow):
             info[cam] = c
             names = ', '.join(os.path.basename(p) for p in src.paths)
             length = f'{src.total_ms / 60000:.1f} min' if src.total_ms >= 60000 else f'{src.total_ms / 1000:.1f} s'
-            text = (f'<b>{cam}</b>: {c["width"]}x{c["height"]}, {c["fps"]:.3f} fps, {length}'
+            fmt = vs.video_format(src.paths[0])
+            codec = (f', {fmt["codec"].upper()}{" 10-bit" if fmt["ten_bit"] else ""}'
+                     if fmt and fmt['codec'] in ('hevc', 'h264') else '')
+            text = (f'<b>{cam}</b>: {c["width"]}x{c["height"]}, {c["fps"]:.3f} fps{codec}, {length}'
                     + (f' - {len(src.paths)} chapters ({names})' if len(src.paths) > 1 else ''))
             warn = src.check() + timecode.chapter_gaps(path)
             if warn:
                 text += '<br><span style="color:#b00">' + '<br>'.join(warn) + '</span>'
+            notes = vs.camera_notes(c, fmt)
+            if notes:
+                text += '<br><span style="color:#a60">' + '<br>'.join(notes) + '</span>'
             lines.append(text)
         if len(info) == 2:
             a, b = info['A'], info['B']
             if (a['width'], a['height']) != (b['width'], b['height']) or abs(a['fps'] - b['fps']) > 0.01:
                 lines.append('<span style="color:#b00">The two videos differ in resolution or frame rate - record both '
-                             'cameras with the same settings (4K, 60 fps, Linear, HyperSmooth off).</span>')
+                             'cameras with the same settings (resolution, frame rate, lens Linear, HyperSmooth off).</span>')
         self.l_videos.setText('<br>'.join(lines))
 
     def auto_offset(self, force=False):
@@ -467,12 +473,21 @@ class LabApp(QtWidgets.QMainWindow):
             import sync_videos
             return sync_videos.audio_offset(a, b)
 
+        clock = timecode.clock_reading_offset(off, ta)
+
         def done(r):
             snd, conf = r
             diff = abs(snd - off) * fps
             base = self.l_sync.text().replace(' Checking against the sound…', '')
             if conf < 1.5:
                 msg = f' Sound: {snd:+.4f} s, but the sound match is unclear - not used as a check.'
+            elif diff > 1 and clock is not None and abs(snd - clock) * fps <= 1:
+                # 59.94 fps: the sound agrees with the timecode read as clock time (see timecode.py) - use that
+                self.s_offset.setValue(clock)
+                self.form_to_state()
+                self.save()
+                msg = (f' <span style="color:#080">Sound agrees with the timecode read as clock time: {clock:+.4f} s '
+                       f'(sound {snd:+.4f} s) - this offset is used.</span>')
             elif diff > 1:
                 msg = (f'<br><span style="color:#b00"><b>Warning:</b> the sound gives {snd:+.4f} s, '
                        f'{diff:.1f} frames from the timecode offset - check the cameras\' timecode sync.</span>')

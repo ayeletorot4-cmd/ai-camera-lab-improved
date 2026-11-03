@@ -148,7 +148,7 @@ class ChapterGaps(unittest.TestCase):
         start = tc.timecode_to_frames('10:00:00:00', 60)
         write_tmcd_mp4(a, counter=start, timescale=60, frame_duration=1)
         write_tmcd_mp4(b, counter=start + second_start_frames, timescale=60, frame_duration=1)
-        src = mock.Mock(info=[dict(duration_ms=60000.0, fps=60.0), dict(duration_ms=30000.0, fps=60.0)])
+        src = mock.Mock(info=[dict(duration_ms=60000.0, fps=60.0, frames=3600), dict(duration_ms=30000.0, fps=60.0, frames=1800)])
         with mock.patch('shutil.which', return_value=None), mock.patch('cv2.VideoCapture') as cap, \
                 mock.patch.object(vs, 'VideoSource', return_value=src):
             cap.return_value.get.return_value = 60.0
@@ -171,6 +171,105 @@ class ChapterGaps(unittest.TestCase):
             cap.return_value.get.return_value = 60.0
             self.assertEqual(tc.start_timecode(b)['seconds'], 1000 / 60)      # a clip starts at its first chapter
             self.assertEqual(tc.start_timecode(b, chapter_only=True)['seconds'], 4600 / 60)
+
+
+class Hero13(unittest.TestCase):
+    """GoPro HERO13 Black specifics: 59.94 / 50 fps timecode readings, chapter continuity, HEVC 10-bit, names."""
+
+    def test_clock_reading_offset(self):
+        a = dict(fps=60000 / 1001, drop=False)
+        self.assertAlmostEqual(tc.clock_reading_offset(60.0, a), 60.0 * (60000 / 1001) / 60)   # 59.94 s: 0.1 % less
+        self.assertIsNone(tc.clock_reading_offset(60.0, dict(fps=50.0, drop=False)))        # Anti-Flicker 50 Hz
+        self.assertIsNone(tc.clock_reading_offset(60.0, dict(fps=60.0, drop=False)))
+        self.assertIsNone(tc.clock_reading_offset(60.0, dict(fps=60000 / 1001, drop=True)))  # drop-frame = clock
+
+    def _chapters_5994(self, step):
+        d = tempfile.mkdtemp()
+        a, b = os.path.join(d, 'GX010008.MP4'), os.path.join(d, 'GX020008.MP4')
+        start = tc.timecode_to_frames('11:00:00:00', 59.94)
+        write_tmcd_mp4(a, counter=start)
+        write_tmcd_mp4(b, counter=start + step)
+        fps = 60000 / 1001
+        src = mock.Mock(info=[dict(frames=30000, fps=fps, duration_ms=30000 / fps * 1000),
+                              dict(frames=100, fps=fps, duration_ms=100 / fps * 1000)])
+        with mock.patch('shutil.which', return_value=None), mock.patch('cv2.VideoCapture') as cap, \
+                mock.patch.object(vs, 'VideoSource', return_value=src):
+            cap.return_value.get.return_value = fps
+            return tc.chapter_gaps(a)
+
+    def test_chapters_5994_either_counting(self):
+        self.assertEqual(self._chapters_5994(30000), [])        # timecode counts frames
+        self.assertEqual(self._chapters_5994(30030), [])        # timecode counts the clock (30000 x 60/59.94)
+        warn = self._chapters_5994(30000 + 120)                 # 2 s missing
+        self.assertEqual(len(warn), 1)
+        self.assertIn('ms after the end', warn[0])
+
+    def test_names(self):
+        d = tempfile.mkdtemp()
+        for name in ('GX010042.MP4', 'GX020042.MP4', 'GL010042.LRV', 'GX010042.THM'):
+            open(os.path.join(d, name), 'w').close()
+        self.assertEqual([os.path.basename(p) for p in vs.chapters(os.path.join(d, 'GX020042.MP4'))],
+                         ['GX010042.MP4', 'GX020042.MP4'])       # the low-res proxy / thumbnail are not chapters
+
+    @staticmethod
+    def _video_mp4(path, entry, config_type, config):
+        ftyp = _box('ftyp', b'mp41' + b'\0\0\0\0' + b'mp41')
+        hdlr = _box('hdlr', b'\0' * 8 + b'vide' + b'\0' * 12 + b'GoPro H.265\0')
+        sample = b'\0' * 78 + _box(config_type, config)
+        stsd = _box('stsd', b'\0' * 4 + struct.pack('>I', 1) + struct.pack('>I4s', 8 + len(sample), entry.encode())
+                    + sample)
+        moov = _box('moov', _box('trak', _box('mdia', hdlr + _box('minf', _box('stbl', stsd)))))
+        with open(path, 'wb') as f:
+            f.write(ftyp + moov)
+
+    def test_video_format(self):
+        d = tempfile.mkdtemp()
+        p = os.path.join(d, 'GX010001.MP4')
+        hvcc = lambda profile, luma: bytes([1, profile]) + b'\0' * 15 + bytes([0xF8 | luma]) + b'\0' * 10
+        self._video_mp4(p, 'hvc1', 'hvcC', hvcc(2, 2))
+        self.assertEqual(vs.video_format(p), dict(codec='hevc', ten_bit=True))
+        self._video_mp4(p, 'hvc1', 'hvcC', hvcc(1, 0))
+        self.assertEqual(vs.video_format(p), dict(codec='hevc', ten_bit=False))
+        self._video_mp4(p, 'avc1', 'avcC', bytes([1, 100, 0, 51]) + b'\0' * 4)
+        self.assertEqual(vs.video_format(p), dict(codec='h264', ten_bit=False))
+        write_tmcd_mp4(p, counter=1)                             # no video track
+        self.assertIsNone(vs.video_format(p))
+        open(p, 'wb').close()                                    # not an MP4
+        self.assertIsNone(vs.video_format(p))
+
+    def test_camera_notes(self):
+        self.assertEqual(vs.camera_notes(dict(fps=50.0), dict(codec='hevc', ten_bit=False)), [])
+        notes = vs.camera_notes(dict(fps=60000 / 1001), dict(codec='hevc', ten_bit=True))
+        self.assertEqual(len(notes), 2)
+        self.assertIn('8-bit', notes[0])
+        self.assertIn('50 Hz', notes[1])
+
+    def test_real_encoded_files(self):
+        """Files made by FFmpeg like a GoPro's: HEVC 10-bit 59.94 fps with a timecode track; H.264 50 fps."""
+        import shutil
+        import subprocess
+        if not shutil.which('ffmpeg'):
+            self.skipTest('ffmpeg is not installed')
+        d = tempfile.mkdtemp()
+        a, b = os.path.join(d, 'GX010001.MP4'), os.path.join(d, 'GH010002.MP4')
+        for path, rate, codec, pix, t in ((a, '60000/1001', 'libx265', 'yuv420p10le', '13:45:10:22'),
+                                          (b, '50', 'libx264', 'yuv420p', '09:00:00:10')):
+            r = subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', f'testsrc=size=160x120:rate={rate}',
+                                '-t', '0.5', '-c:v', codec, '-pix_fmt', pix, '-timecode', t, path], capture_output=True)
+            if r.returncode:
+                self.skipTest(f'ffmpeg could not make {codec}: {r.stderr[-200:]}')
+        self.assertEqual(vs.video_format(a), dict(codec='hevc', ten_bit=True))
+        self.assertEqual(vs.video_format(b), dict(codec='h264', ten_bit=False))
+        readings = [(tc.start_timecode(a), tc.start_timecode(b))]          # with ffprobe (if installed)
+        with mock.patch('shutil.which', return_value=None):                 # the built-in reader
+            readings.append((tc.start_timecode(a), tc.start_timecode(b)))
+        self.assertEqual(readings[1][0]['source'], 'file')
+        for ta, tb in readings:
+            self.assertEqual(ta['timecode'], '13:45:10:22')
+            self.assertEqual(ta['frames'], tc.timecode_to_frames('13:45:10:22', 59.94))
+            self.assertAlmostEqual(ta['fps'], 60000 / 1001, places=3)
+            self.assertEqual(tb['timecode'], '09:00:00:10')
+            self.assertAlmostEqual(tb['seconds'], 9 * 3600 + 0.2)
 
 
 class Chapters(unittest.TestCase):

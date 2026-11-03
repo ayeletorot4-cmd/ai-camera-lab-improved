@@ -73,6 +73,10 @@ A window app for whole experiment sessions: double-click **`Lab App.command`** (
 
 ## Two GoPro cameras (recommended setup)
 **Camera settings** - the same on both cameras: GoPro HERO13 Black, **4K, 60 fps, lens Linear, HyperSmooth (stabilization) OFF**, on fixed mounts (don't move them during the day - then one calibration serves every recording of that day).
+- **Frame rate in Israel**: GoPro's "60 fps" is really 59.94 fps (Anti-Flicker 60 Hz). Mains power here is 50 Hz, so room lights flicker at 100 Hz; with **Anti-Flicker 50 Hz** the camera records **50 fps** (or 100 / 200), which avoids the flicker and gives a whole frame rate, so the timecode offset is exact. At 59.94 fps the timecode can be read as frames or as clock time (0.1 % apart, e.g. 30 ms for a 30 s offset); the app keeps the reading the sound agrees with.
+- **Bit depth 8-bit** ("10-bit color" off): 10-bit HEVC decodes more slowly and the app uses 8 bits anyway. Codec HEVC (`GX` files) or H.264 (`GH` files) both work.
+- The app shows each video's resolution, frame rate and codec, and a note when these settings are not as above.
+- The timecode sync holds as long as the camera's clock runs; the clocks of two cameras drift apart slowly, so sync again at the start of each recording day and after a battery has been taken out.
 
 **The board** - `venv/bin/python calibrate_cameras.py make-board` writes `outputs/charuco_board.pdf` (exact A4 scale) and `charuco_board.png`: a ChArUco board of 5 x 7 squares, 38 mm, `DICT_4X4_50` markers. Print the PDF **at 100% / Actual size** (not "fit to page"), check the 100 mm bar and one square with a ruler (38 mm; note the measured size), and glue it to something flat and stiff.
 
@@ -88,7 +92,7 @@ The timecode is read with `ffprobe` (FFmpeg) if installed - on a Mac `brew insta
 
 Command line: `venv/bin/python calibrate_cameras.py board GX010123.MP4 GX010456.MP4 [--offset S] [--start S] [--seconds 60] [--square-mm 38]` (offset from the timecodes if not given).
 
-**Tests**: `venv/bin/python -m unittest discover -s tests -v` (timecodes incl. drop-frame and 59.94, the offset's sign, chapters, pairing of board frames with an offset, the printed board).
+**Tests**: `venv/bin/python -m unittest discover -s tests -v` (timecodes incl. drop-frame and 59.94, the offset's sign, chapters, HERO13 files (HEVC 10-bit, 50 fps), pairing of board frames with an offset, the printed board).
 
 ## Two cameras (3D)
 Two cameras filming the same session from different angles give each joint's position in 3D, which fixes what one camera can't see (depth, a joint hidden behind the body, angles distorted by perspective). Three steps, on a Mac, from this folder:

@@ -15,6 +15,7 @@ change the measured switch light levels.
 """
 import os
 import re
+import struct
 import sys
 
 import cv2
@@ -227,6 +228,70 @@ class VideoSource:
                     out.append(f"{os.path.basename(c['path'])}: {c['width']}x{c['height']} {c['fps']:.3f} fps, "
                                f"unlike the first chapter ({c0['width']}x{c0['height']} {c0['fps']:.3f} fps)")
         return out
+
+
+def video_format(path):
+    """Codec and bit depth of an MP4/MOV video, read from the file itself (no FFmpeg needed):
+    dict(codec='hevc' | 'h264' | <sample entry name>, ten_bit=bool) or None if it can't be read.
+    GoPro HERO13: HEVC ('GX' files) 8-bit, or 10-bit with "10-bit color" on; H.264 ('GH' files) is 8-bit."""
+    import timecode as tc   # the MP4 box reader lives there
+    try:
+        with open(path, 'rb') as f:
+            moov = tc._child(f, 0, os.path.getsize(path), 'moov')
+            if moov is None:
+                return None
+            for typ, s, e in tc._boxes(f, *moov):
+                if typ != 'trak':
+                    continue
+                mdia = tc._child(f, s, e, 'mdia')
+                hdlr = mdia and tc._child(f, *mdia, 'hdlr')
+                if not hdlr:
+                    continue
+                f.seek(hdlr[0] + 8)
+                if f.read(4) != b'vide':
+                    continue
+                minf = tc._child(f, *mdia, 'minf')
+                stbl = minf and tc._child(f, *minf, 'stbl')
+                stsd = stbl and tc._child(f, *stbl, 'stsd')
+                if not stsd:
+                    return None
+                f.seek(stsd[0] + 8)                     # version/flags, entry count
+                entry_size, entry = struct.unpack('>I4s', f.read(8))
+                entry = entry.decode('latin1')
+                e_start = stsd[0] + 8
+                # A visual sample entry has 78 bytes after its 8-byte header, then its boxes (hvcC / avcC ...)
+                kids = dict((t, (cs, ce)) for t, cs, ce in tc._boxes(f, e_start + 8 + 78, e_start + entry_size))
+                ten_bit = False
+                if 'hvcC' in kids:
+                    f.seek(kids['hvcC'][0] + 1)
+                    profile = f.read(1)[0] & 0x1F         # general_profile_idc: 1 Main, 2 Main 10
+                    f.seek(kids['hvcC'][0] + 17)
+                    luma = f.read(1)[0] & 0x07            # bitDepthLumaMinus8
+                    ten_bit = profile == 2 or luma >= 2
+                    codec = 'hevc'
+                elif 'avcC' in kids:
+                    f.seek(kids['avcC'][0] + 1)
+                    ten_bit = f.read(1)[0] == 110            # High 10 profile
+                    codec = 'h264'
+                else:
+                    codec = {'hvc1': 'hevc', 'hev1': 'hevc', 'avc1': 'h264', 'avc3': 'h264'}.get(entry, entry)
+                return dict(codec=codec, ten_bit=ten_bit)
+    except (OSError, struct.error, IndexError, ValueError):
+        return None
+    return None
+
+
+def camera_notes(info, fmt):
+    """Hints about a camera's settings (one chapter's info from VideoSource + video_format) for the lab setup."""
+    out = []
+    if fmt and fmt.get('ten_bit'):
+        out.append('10-bit video: decoding is slower and the app uses 8 bits anyway - set the camera to 8-bit '
+                   '(turn "10-bit color" off).')
+    fps = info.get('fps') or 0
+    if fps and abs(fps - round(fps)) > 1e-3:
+        out.append(f'{fps:.3f} fps: the room lights in Israel flicker at 100 Hz (50 Hz mains), and the timecode is '
+                   'only exact to 0.1 % at this rate. Anti-Flicker 50 Hz on the camera gives 50 fps (whole frames).')
+    return out
 
 
 def open_video_writer(path, fps, size):
