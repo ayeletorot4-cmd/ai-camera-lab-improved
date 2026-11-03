@@ -42,6 +42,13 @@ def save_cameras(path, cam_a, cam_b, R, t, units, method, extra=None):
 
 
 def load_cameras(path):
+    """Read a calibration file that save_cameras() wrote.
+
+    Input: path - the calibration .json file.
+    Returns: (cameras, units) - a list of the two cameras, each a dict with K (the lens: focal length and
+    image centre), dist (lens distortion), R and t (where the camera is; camera A is the reference, so it gets
+    "no rotation, no shift"), size (image width, height) - and the length units of t (e.g. 'cm').
+    """
     with open(path) as f:
         d = json.load(f)
     a, b = d['camera_a'], d['camera_b']
@@ -51,6 +58,11 @@ def load_cameras(path):
 
 
 def K_matrix(f, size):
+    """The camera's "lens matrix" (K) for a simple lens: focal length f in pixels, image centre in the middle.
+
+    Inputs: f - focal length (pixels); size - image (width, height) in pixels.
+    Returns: a 3 x 3 numpy array.
+    """
     return np.array([[f, 0, size[0] / 2], [0, f, size[1] / 2], [0, 0, 1]], float)
 
 
@@ -74,11 +86,21 @@ def calibrate_from_points(pa, pb, size_a, size_b, f_a, f_b, refine_focal=None):
     _, R, t = best
 
     def unpack(p):  # one focal scale shared by both cameras (similar lenses): steadier with few points
+        """Turn the optimizer's flat list of numbers back into named pieces.
+
+        Input: p - the list of numbers being adjusted (focal scale, rotation, direction of camera B, 3D points).
+        Returns: (focal A, focal B, rotation of B, unit direction of B, the 3D points).
+        """
         fa, fb = (f_a * p[0], f_b * p[0]) if refine_focal else (f_a, f_b)
         q = p[1:] if refine_focal else p
         return fa, fb, cv2.Rodrigues(q[:3])[0], q[3:6] / np.linalg.norm(q[3:6]), q[6:].reshape(n, 3)
 
     def residuals(p):
+        """How far off the current guess is: for every clicked point, the gap (pixels) between where the guess
+        says the point should appear in each camera and where it was actually clicked.
+
+        Input: p - the current guess (see unpack). Returns: one flat array of all the gaps (x and y, both cameras).
+        """
         fa, fb, Rb, tb, X = unpack(p)
         ra = project(X, K_matrix(fa, size_a), np.zeros(5), np.eye(3), np.zeros(3)) - pa
         rb = project(X, K_matrix(fb, size_b), np.zeros(5), Rb, tb) - pb
@@ -93,6 +115,12 @@ def calibrate_from_points(pa, pb, size_a, size_b, f_a, f_b, refine_focal=None):
 
 
 def project(X, K, dist, R, t):
+    """Where 3D points appear in a camera's picture.
+
+    Inputs: X - 3D points (N x 3); K - the camera's lens matrix; dist - lens distortion; R, t - the camera's
+    rotation and position.
+    Returns: pixel positions, an N x 2 array (x, y).
+    """
     p, _ = cv2.projectPoints(np.asarray(X, np.float64).reshape(-1, 1, 3), cv2.Rodrigues(R)[0], np.asarray(t, float),
                              K, np.asarray(dist, float))
     return p.reshape(-1, 2)
@@ -111,6 +139,10 @@ def triangulate_px(pa, pb, Ka, Kb, R, t, dist_a=np.zeros(5), dist_b=np.zeros(5))
 # Board
 # -----------------------------
 def make_board():
+    """Create the ChArUco calibration board (black squares with small coded markers) and its detector.
+
+    Returns: (board, detector) - the board's description, and an OpenCV object that finds the board in a frame.
+    """
     dictionary = cv2.aruco.getPredefinedDictionary(BOARD_DICT)
     board = cv2.aruco.CharucoBoard(BOARD_SQUARES, BOARD_SQUARE_MM, BOARD_SQUARE_MM * BOARD_MARKER_RATIO, dictionary)
     return board, cv2.aruco.CharucoDetector(board)
@@ -129,11 +161,21 @@ def _layout():
 
 
 def board_image(px_per_square):
+    """A picture of the board alone (no page margins), for printing.
+
+    Input: px_per_square - how many pixels each square gets.
+    Returns: a black-and-white image (numpy array).
+    """
     board, _ = make_board()
     return board.generateImage((BOARD_SQUARES[0] * px_per_square, BOARD_SQUARES[1] * px_per_square), marginSize=0)
 
 
 def write_board_png(path, dpi=300):
+    """Save the printable A4 page (board + "print at 100%" text + 100 mm check bar) as a PNG image.
+
+    Inputs: path - where to save; dpi - pixels per inch (300 = good print quality).
+    Returns: nothing (writes the file).
+    """
     px = dpi / 25.4
     lay = _layout()
     page = np.full((int(round(A4_MM[1] * px)), int(round(A4_MM[0] * px))), 255, np.uint8)
@@ -199,6 +241,10 @@ def write_board_pdf(path, px_per_mm=20):
 
 
 def run_make_board(args):
+    """The "make-board" command: save the printable board as PDF and PNG in the outputs folder.
+
+    Input: args - the command-line arguments (not used). Returns: nothing (writes 2 files, prints their paths).
+    """
     os.makedirs(OUT_DIR, exist_ok=True)
     png, pdf = os.path.join(OUT_DIR, 'charuco_board.png'), os.path.join(OUT_DIR, 'charuco_board.pdf')
     write_board_png(png)
@@ -207,6 +253,12 @@ def run_make_board(args):
 
 
 def detect_board(detector, frame, min_corners=6):
+    """Look for the calibration board in one video frame.
+
+    Inputs: detector - from make_board(); frame - a color video frame; min_corners - how many board corners
+    must be seen to count it as found.
+    Returns: (corner pixel positions, corner id numbers), or None if the board was not found.
+    """
     corners, ids, _, _ = detector.detectBoard(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
     if ids is None or len(ids) < min_corners:
         return None
@@ -217,10 +269,16 @@ class _Sequential:
     """Reads a video forward and hands out the frame closest to a time (ms on the video's own clock)."""
 
     def __init__(self, src, fps):
+        """Inputs: src - an open video; fps - its frames per second (used to know how close "closest" must be)."""
         self.src, self.half = src, 500.0 / fps
         self.t, self.done = None, False
 
     def at(self, target_ms):
+        """The frame shown at a given moment, reading forward only (fast; it never jumps back).
+
+        Input: target_ms - the moment, in milliseconds on this video's clock.
+        Returns: the frame (image), or None if the video has no frame at that moment.
+        """
         while not self.done and (self.t is None or self.t < target_ms - self.half):
             if not self.src.grab():
                 self.done = True
@@ -361,6 +419,12 @@ def calibrate_board(video_a, video_b, offset_s=0.0, square_mm=BOARD_SQUARE_MM, s
 
 
 def save_board_calibration(path, res, video_a, video_b):
+    """Save a board calibration result to a .json file (the cameras plus the quality numbers and warnings).
+
+    Inputs: path - the .json file to write; res - the result of calibrate_board(); video_a, video_b - the two
+    calibration videos (their paths are stored in the file for reference).
+    Returns: nothing.
+    """
     ca, cb = res['cameras']
     save_cameras(path, ca, cb, res['R'], res['t_cm'], 'cm', 'board',
                  dict(video_a=os.path.abspath(video_a), video_b=os.path.abspath(video_b),
@@ -370,6 +434,12 @@ def save_board_calibration(path, res, video_a, video_b):
 
 
 def board_report(res):
+    """A short readable text about a board calibration (shown to the user in the Lab App).
+
+    Input: res - the result of calibrate_board().
+    Returns: several lines of text: how many frames had the board, fit errors, distance between the cameras,
+    the size check of the squares, and PASS or the warnings.
+    """
     lines = [f"Board found in {res['frames_a']} frames of A, {res['frames_b']} of B, {res['frames_both']} of both.",
              f"Lens fit error: A {res['lens_rms_px'][0]:.2f} px, B {res['lens_rms_px'][1]:.2f} px; "
              f"stereo fit error {res['stereo_rms_px']:.2f} px.",
@@ -381,6 +451,7 @@ def board_report(res):
 
 
 def main():
+    """Command line entry: `python calibrate_cameras.py make-board` saves the printable board."""
     parser = argparse.ArgumentParser(description='Print the camera calibration board (the calibration itself is '
                                                  'done in the Lab App).')
     sub = parser.add_subparsers(dest='mode', required=True)

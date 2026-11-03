@@ -33,6 +33,9 @@ FFPROBE_HELP = ('ffprobe (FFmpeg) is not installed. On a Mac: install Homebrew (
 
 
 class TimecodeError(Exception):
+    """The error raised when a video's timecode can't be read or doesn't make sense
+    (the Lab App shows its message to the user).
+    """
     pass
 
 
@@ -67,6 +70,11 @@ def timecode_to_frames(tc, fps, drop_frame=None):
 
 
 def frames_to_timecode(n, fps, drop_frame=False):
+    """The opposite of timecode_to_frames: a frame number -> timecode text.
+
+    Inputs: n - frame number since 00:00:00:00; fps - frame rate; drop_frame - True for drop-frame timecode.
+    Returns: text like '13:05:42:17' (or '13:05:42;17' for drop-frame).
+    """
     rate = nominal_rate(fps)
     if drop_frame:
         k = round(rate / 15)
@@ -89,6 +97,12 @@ def timecode_seconds(tc, fps, drop_frame=None):
 # Reading a file's start timecode
 # -----------------------------
 def _ffprobe(path):
+    """Ask ffprobe (part of FFmpeg) to describe a video file.
+
+    Input: path - the video file.
+    Returns: ffprobe's description as a dict (streams, format, tags), or None if ffprobe is not installed.
+    Raises TimecodeError if ffprobe fails on the file.
+    """
     exe = shutil.which('ffprobe')
     if exe is None:
         return None
@@ -100,6 +114,11 @@ def _ffprobe(path):
 
 
 def _rate(text):
+    """A frame rate written as text -> a number.
+
+    Input: text - e.g. '60000/1001' or '50' (as ffprobe writes it).
+    Returns: the frame rate (e.g. 59.94), or None if it is missing or zero.
+    """
     if not text or text in ('0/0', '0'):
         return None
     if '/' in text:
@@ -140,6 +159,11 @@ def _boxes(f, start, end):
 
 
 def _child(f, start, end, typ):
+    """Find a box (section) of a given type inside an MP4 file region.
+
+    Inputs: f - the open file; start, end - the region to search (byte positions); typ - the box type, e.g. 'moov'.
+    Returns: (data start, box end) of the first such box, or None if there is none.
+    """
     return next(((s, e) for t, s, e in _boxes(f, start, end) if t == typ), None)
 
 

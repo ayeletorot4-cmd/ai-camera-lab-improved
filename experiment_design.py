@@ -27,6 +27,10 @@ IGNORE = '(ignore)'
 
 @dataclass
 class Settings:
+    """The numbers that describe the experiment's design (how many trials per sequence, sequences per block,
+    how long a pause separates blocks, how long a light stays on, etc.). Each field has its meaning written next
+    to it. The Lab App saves these with the session, so they can be changed per session.
+    """
     trials_per_sequence: int = 6
     sequences_per_block: int = 5
     block_gap_s: float = 10.0        # a pause longer than this between two lights starts a new block
@@ -39,6 +43,11 @@ class Settings:
 
 @dataclass
 class Part:
+    """One part of a session, e.g. "pre_test".
+
+    Fields: name - the part's name; blocks - how many blocks it has; limb - 'upper' (hand) or 'lower' (foot);
+    side - 'right' or 'left'.
+    """
     name: str
     blocks: int
     limb: str     # 'upper' / 'lower'

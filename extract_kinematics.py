@@ -65,10 +65,18 @@ SWITCH_BOX_PAD = 0.1        # found boxes are enlarged by 10% of their size on e
 
 
 def _disk(d):
+    """A round "brush" of diameter d pixels, used to grow, shrink or smooth shapes in a mask.
+
+    Input: d - diameter in pixels. Returns: a small 0/1 image of a filled circle.
+    """
     return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (d, d))
 
 
 def _fill_holes(mask):
+    """Fill the holes inside every shape of a mask (e.g. a ring becomes a full disk).
+
+    Input: mask - a 0/1 image. Returns: a new 0/1 image with each outer shape filled in.
+    """
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     out = np.zeros_like(mask)
     cv2.drawContours(out, contours, -1, 1, -1)
@@ -194,6 +202,10 @@ def find_switches(background, pink_frac):
     boxes = switch_candidates(background, 1.0) + switch_candidates(background, 0.5)
 
     def light(box):  # share of the area around the switch where its pink LED/glow appeared
+        """Score a candidate box by its light: the share of the area around it where pink LED light was seen.
+
+        Input: box - [x0, y0, x1, y1] in pixels. Returns: a number from 0 (never lit) to 1.
+        """
         x0, y0, x1, y1 = box
         bw, bh = x1 - x0, y1 - y0
         return float((pink_frac[max(0, y0 - bh):y1 + bh, max(0, x0 - bw):x1 + bw] > 0.02).mean())
@@ -212,6 +224,12 @@ def find_switches(background, pink_frac):
 
 
 def sort_switches(boxes, flip=False):
+    """Put switch boxes in their standard order: switch 1, 2, 3 ... from the subject's right to left.
+
+    Inputs: boxes - switch boxes as [x0, y0, x1, y1] fractions of the frame; flip - True to reverse the order
+    (used when the automatic order came out mirrored).
+    Returns: the same boxes, re-ordered.
+    """
     order = order_switches([((b[0] + b[2]) / 2, (b[1] + b[3]) / 2) for b in boxes])
     boxes = [boxes[i] for i in order]
     return boxes[::-1] if flip else boxes
@@ -272,16 +290,29 @@ class CameraMotion:
     SCALE = 0.25  # features are found on a quarter-size copy (fast, enough for whole-frame motion)
 
     def __init__(self, first_frame):
+        """Remember the first frame's features; all later frames are compared to it.
+
+        Input: first_frame - the video's first color frame.
+        """
         self.orb = cv2.ORB_create(2000)
         self.matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
         self.ref_kp, self.ref_des = self.orb.detectAndCompute(self._small_gray(first_frame), None)
         self.M = np.float32([[1, 0, 0], [0, 1, 0]])
 
     def _small_gray(self, frame):
+        """A small grayscale copy of a frame (features are found faster on it).
+
+        Input: frame - a color frame. Returns: the shrunken gray image.
+        """
         small = cv2.resize(frame, None, fx=self.SCALE, fy=self.SCALE, interpolation=cv2.INTER_AREA)
         return cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
 
     def update(self, frame):
+        """Measure how much the camera moved in this frame compared with the first frame, and remember it.
+        If the frame can't be matched well enough, the last known movement is kept.
+
+        Input: frame - the current color frame. Returns: nothing (updates self.M).
+        """
         kp, des = self.orb.detectAndCompute(self._small_gray(frame), None)
         if des is None or self.ref_des is None or len(kp) < 10:
             return  # keep the last known camera position
@@ -295,6 +326,10 @@ class CameraMotion:
             self.M = M.astype(np.float32)
 
     def apply(self, pts):
+        """Move first-frame points to where they are in the current frame (using the last update()).
+
+        Input: pts - points (x, y) in first-frame pixels. Returns: the same points in current-frame pixels (N x 2).
+        """
         return cv2.transform(pts.reshape(-1, 1, 2), self.M).reshape(-1, 2)
 
 

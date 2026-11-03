@@ -34,6 +34,10 @@ FLAG_COLOR = {'miss': '#f8d7da', 'not detected': '#e2e3e5', 'unknown': '#e2e3e5'
 # Helpers
 # -----------------------------
 def to_pixmap(bgr):
+    """Turn a video frame (OpenCV image, BGR colors) into a picture Qt can show on screen.
+
+    Input: bgr - the frame. Returns: a QPixmap.
+    """
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     h, w = rgb.shape[:2]
     img = QtGui.QImage(rgb.data, w, h, 3 * w, QtGui.QImage.Format_RGB888)
@@ -46,6 +50,10 @@ def read_frame(path, index=0):
 
 
 def mmss(ms):
+    """Milliseconds -> 'minutes:seconds' text for the screen, e.g. 83500 -> '1:23.50'.
+
+    Input: ms - time in milliseconds (or None). Returns: the text ('' for None).
+    """
     if ms is None:
         return ''
     s = ms / 1000
@@ -53,6 +61,11 @@ def mmss(ms):
 
 
 def fmt(v, digits=3):
+    """A value -> short text for a table cell.
+
+    Inputs: v - the value; digits - decimals for numbers.
+    Returns: '' for missing values (None / NaN), numbers with `digits` decimals, anything else as text.
+    """
     if v is None or (isinstance(v, float) and np.isnan(v)):
         return ''
     if isinstance(v, (float, np.floating)):
@@ -67,11 +80,15 @@ class Worker(QThread):
     failed = Signal(str)
 
     def __init__(self, fn):
+        """Input: fn - the work to do; it is called as fn(progress, should_stop) when the thread starts."""
         super().__init__()
         self.fn = fn
         self.stop_requested = False
 
     def run(self):
+        """The background thread: run the work, then send `done` with its result, or `failed` with the error
+        message (the app shows it to the user).
+        """
         try:
             self.done.emit(self.fn(lambda f, text='': self.progress.emit(f, text), lambda: self.stop_requested))
         except Exception as e:  # shown to the user
@@ -85,6 +102,7 @@ class BoxView(QtWidgets.QGraphicsView):
     box_drawn = Signal(list)
 
     def __init__(self):
+        """Set up an empty picture area."""
         super().__init__()
         self.setScene(QtWidgets.QGraphicsScene(self))
         self.setRenderHint(QtGui.QPainter.Antialiasing)
@@ -96,6 +114,10 @@ class BoxView(QtWidgets.QGraphicsView):
         self.rubber = None
 
     def show_frame(self, bgr, boxes):
+        """Show a frame with the switch boxes drawn on it (yellow, numbered 1, 2, 3 ...).
+
+        Inputs: bgr - the frame (None = show nothing); boxes - switch boxes as [x0, y0, x1, y1] fractions of the frame.
+        """
         self.scene().clear()
         self.rubber = None
         if bgr is None:
@@ -115,15 +137,18 @@ class BoxView(QtWidgets.QGraphicsView):
         self.fitInView(self.scene().sceneRect(), Qt.KeepAspectRatio)
 
     def resizeEvent(self, e):
+        """When the window changes size, scale the picture to fit."""
         super().resizeEvent(e)
         if self.scene().items():
             self.fitInView(self.scene().sceneRect(), Qt.KeepAspectRatio)
 
     def start_drawing(self):
+        """Get ready for the user to drag a new box (the mouse pointer becomes a cross)."""
         self.drawing = True
         self.setCursor(Qt.CrossCursor)
 
     def mousePressEvent(self, e):
+        """Mouse button pressed while drawing: start the box at this point."""
         if self.drawing:
             self.start = self.mapToScene(e.position().toPoint())
             self.rubber = self.scene().addRect(QtCore.QRectF(self.start, self.start),
@@ -131,11 +156,15 @@ class BoxView(QtWidgets.QGraphicsView):
         super().mousePressEvent(e)
 
     def mouseMoveEvent(self, e):
+        """Mouse moved while drawing: stretch the box to the pointer."""
         if self.drawing and self.start is not None and self.rubber is not None:
             self.rubber.setRect(QtCore.QRectF(self.start, self.mapToScene(e.position().toPoint())).normalized())
         super().mouseMoveEvent(e)
 
     def mouseReleaseEvent(self, e):
+        """Mouse button released while drawing: finish the box and send it (box_drawn) as [x0, y0, x1, y1]
+        fractions of the frame. Very small boxes (a click without dragging) are ignored.
+        """
         if self.drawing and self.start is not None:
             r = QtCore.QRectF(self.start, self.mapToScene(e.position().toPoint())).normalized()
             self.drawing, self.start = False, None
@@ -148,12 +177,21 @@ class BoxView(QtWidgets.QGraphicsView):
 
 
 def group(title, layout):
+    """A framed box with a title around some controls on a page.
+
+    Inputs: title - the title shown on the frame; layout - the controls inside. Returns: the QGroupBox.
+    """
     g = QtWidgets.QGroupBox(title)
     g.setLayout(layout)
     return g
 
 
 def path_row(edit, on_browse, extra=()):
+    """A row with a file path text field and a "Browse…" button (plus optional extra buttons).
+
+    Inputs: edit - the text field; on_browse - what to do when Browse is clicked; extra - more widgets for the row.
+    Returns: the row (a layout).
+    """
     row = QtWidgets.QHBoxLayout()
     row.addWidget(edit, 1)
     b = QtWidgets.QPushButton('Browse…')
@@ -168,7 +206,13 @@ def path_row(edit, on_browse, extra=()):
 # Main window
 # -----------------------------
 class LabApp(QtWidgets.QMainWindow):
+    """The Lab App's main window: the 6 steps on the left (Session, Switches, Process, Blocks & parts,
+    Trials, Export) and the page of the chosen step on the right. self.state holds the session's settings;
+    self.session holds the loaded analysis.
+    """
+
     def __init__(self):
+        """Build the window and all 6 pages, start with an empty session on the Session page."""
         super().__init__()
         self.setWindowTitle('Reaching Lab - MediaPipe')
         self.resize(1400, 860)
@@ -197,18 +241,34 @@ class LabApp(QtWidgets.QMainWindow):
 
     # ---------- shared ----------
     def info(self, text):
+        """Show a short message in the status bar at the bottom of the window (for 15 seconds).
+
+        Input: text - the message.
+        """
         self.status.showMessage(text, 15000)
 
     def error(self, text):
+        """Show a warning pop-up window with a message.
+
+        Input: text - the message.
+        """
         QtWidgets.QMessageBox.warning(self, 'Reaching Lab', text)
 
     def on_page(self, i):
+        """The user clicked a step on the left: keep what was typed, switch to that page and refresh it.
+
+        Input: i - the step's number (0 = Session ... 5 = Export).
+        """
         self.form_to_state()
         self.pages.setCurrentIndex(i)
         [lambda: None, self.refresh_switches, self.refresh_process, self.refresh_blocks,
          self.refresh_trials, lambda: None][i]()
 
     def save(self):
+        """Save the session's settings (session.json in its folder).
+
+        Returns: True if saved; False (with a message) if no subject ID was entered.
+        """
         self.form_to_state()
         if not self.state['subject'].strip():
             self.error('Enter a subject ID first.')
@@ -218,6 +278,13 @@ class LabApp(QtWidgets.QMainWindow):
         return True
 
     def run_bg(self, fn, on_done, label, bar=None):
+        """Run slow work in the background so the window doesn't freeze, with a progress bar
+        (percent done and about how many minutes are left).
+
+        Inputs: fn - the work, called as fn(progress, should_stop); on_done - what to do with the result;
+        label - name shown on the progress bar; bar - which progress bar to use (default: the Process page's bar).
+        Only one job can run at a time.
+        """
         if self.worker is not None and self.worker.isRunning():
             self.error('Something is already running - wait for it or press Cancel.')
             return
@@ -226,6 +293,7 @@ class LabApp(QtWidgets.QMainWindow):
         t0 = time.time()
 
         def prog(f, text):
+            """Update the progress bar. Inputs: f - fraction done (0 to 1); text - extra detail to show."""
             bar.setValue(int(f * 1000))
             el = time.time() - t0
             left = el / f - el if f > 0.01 else None
@@ -239,10 +307,14 @@ class LabApp(QtWidgets.QMainWindow):
         self.worker.start()
 
     def cancel(self):
+        """The Cancel button: ask the background work to stop (it stops at its next check)."""
         if self.worker is not None:
             self.worker.stop_requested = True
 
     def load_session(self):
+        """Load the processed data of the session and analyse it (find the trials and measures).
+        Shows an error message if the analysis fails.
+        """
         try:
             self.session = sa.Session(self.state)
             if self.session.ready:
@@ -253,6 +325,11 @@ class LabApp(QtWidgets.QMainWindow):
 
     # ---------- 1. Session ----------
     def page_session(self):
+        """Build page 1, "Session": subject and session, the video(s), sync, camera calibration,
+        the experimental design and the advanced settings.
+
+        Returns: the page (a QWidget).
+        """
         w = QtWidgets.QWidget()
         v = QtWidgets.QVBoxLayout(w)
         top = QtWidgets.QHBoxLayout()
@@ -364,12 +441,17 @@ class LabApp(QtWidgets.QMainWindow):
         return w
 
     def update_plan(self, *_):
+        """Show the session plan (the parts and their blocks) for the design chosen on the Session page."""
         self.form_to_state()
         parts = sa.template_of(self.state)
         self.l_plan.setText(' → '.join(f'{p.name} ({p.blocks} blocks, {p.limb} {p.side})' for p in parts)
                             + f'   =  {sum(p.blocks for p in parts)} blocks')
 
     def browse_video(self, edit):
+        """Let the user choose a video file, then put it in the text field and check it.
+
+        Input: edit - the text field to fill (camera A or camera B).
+        """
         p, _ = QtWidgets.QFileDialog.getOpenFileName(self, 'Choose a video (GoPro: the first chapter, GX01....MP4)',
                                                      os.path.join(sa.PROJECT_DIR, 'media'),
                                                      'Videos (*.mov *.mp4 *.avi *.mkv *.MOV *.MP4)')
@@ -378,6 +460,7 @@ class LabApp(QtWidgets.QMainWindow):
             self.on_video_chosen(edit)
 
     def browse_calib(self):
+        """Let the user choose the calibration file of an earlier recording (cameras not moved since), then save."""
         p, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, 'Calibration file of an earlier recording (cameras not moved since)', sa.session_dir(self.state)
             if os.path.isdir(sa.session_dir(self.state)) else sa.RESULTS_DIR, 'JSON (*.json)')
@@ -397,6 +480,9 @@ class LabApp(QtWidgets.QMainWindow):
         self.auto_offset()
 
     def describe_videos(self):
+        """Show details of the chosen video(s) under the video fields: size, frame rate, codec, length,
+        GoPro chapters, and warnings (gaps between chapters, settings that differ between the two cameras).
+        """
         import timecode
         lines = []
         info = {}
@@ -451,6 +537,7 @@ class LabApp(QtWidgets.QMainWindow):
             self.save()
 
     def state_to_form(self):
+        """Fill the Session page's fields from self.state (e.g. after opening a saved session)."""
         s = self.state
         self.e_subject.setText(s['subject'])
         self.c_session.setCurrentIndex(0 if s['session'] == 'd1' else 1)
@@ -477,6 +564,9 @@ class LabApp(QtWidgets.QMainWindow):
             self.l_videos.setText(f'<span style="color:#b00">{e}</span>')
 
     def form_to_state(self):
+        """Copy what the user typed/chose on the Session page into self.state (the opposite of state_to_form).
+        Choosing another video clears that camera's switch boxes.
+        """
         s = self.state
         old_a, old_b = s['cam_a'], s.get('cam_b')
         s['subject'] = self.e_subject.text().strip()
@@ -501,6 +591,9 @@ class LabApp(QtWidgets.QMainWindow):
                              light_window_s=self.s_window.value(), block_gap_s=self.s_gap.value(), pattern=pattern)
 
     def open_session(self):
+        """The "Open a saved session…" button: let the user choose a session folder and load it.
+        If the chosen folder holds several sessions (e.g. results/S01), the user picks one from a list.
+        """
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, 'Session folder (results/<subject>/<session>)',
                                                             sa.RESULTS_DIR)
         if not folder:
@@ -526,6 +619,7 @@ class LabApp(QtWidgets.QMainWindow):
         self.info(f'Opened {folder}')
 
     def new_session(self):
+        """The "New session" button: start over with empty settings."""
         self.state = sa.default_state(subject='', session='d1')
         self.session = None
         self.state_to_form()
@@ -545,6 +639,9 @@ class LabApp(QtWidgets.QMainWindow):
             return True
 
     def board_calibration(self):
+        """The "Board calibration…" button: open the board calibration window; if a calibration is saved,
+        put its file in the Camera calibration field.
+        """
         self.form_to_state()
         if self.sync_missing() or not self.save():
             return
@@ -556,6 +653,9 @@ class LabApp(QtWidgets.QMainWindow):
             self.session = None
 
     def click_calibration(self):
+        """The "Click calibration…" button: open the window where matching points are clicked in both videos;
+        if a calibration is saved, put its file in the Camera calibration field. Needs both videos.
+        """
         self.form_to_state()
         if not (self.state['cam_a'] and self.state['cam_b']):
             self.error('Choose both videos first.')
@@ -569,6 +669,11 @@ class LabApp(QtWidgets.QMainWindow):
 
     # ---------- 2. Switches ----------
     def page_switches(self):
+        """Build page 2, "Switches": a frame of the video with the switch boxes, and buttons to find them
+        automatically, flip the numbering, redraw, add or remove a switch.
+
+        Returns: the page (a QWidget).
+        """
         w = QtWidgets.QWidget()
         v = QtWidgets.QVBoxLayout(w)
         top = QtWidgets.QHBoxLayout()
@@ -622,9 +727,11 @@ class LabApp(QtWidgets.QMainWindow):
         return w
 
     def cur_cam(self):
+        """Which camera is chosen on the Switches page. Returns: 'a' or 'b'."""
         return 'b' if self.c_swcam.currentIndex() == 1 else 'a'
 
     def refresh_switches(self):
+        """Show the chosen camera's first frame with its switch boxes, and how many switches are marked."""
         cam = self.cur_cam()
         path = self.state.get(f'cam_{cam}')
         self.s_scan_from.setValue(self.state.get('scan_start_s', 0) / 60)
@@ -640,6 +747,9 @@ class LabApp(QtWidgets.QMainWindow):
                           f"subject's RIGHT to LEFT - use Flip if it's the other way. A box should include the light.")
 
     def find_switches(self):
+        """The "Find switches automatically" button: scan part of the video (from / for the chosen minutes)
+        for the switch lights in the background, then save the boxes found.
+        """
         cam = self.cur_cam()
         path = self.state.get(f'cam_{cam}')
         if not path:
@@ -648,6 +758,7 @@ class LabApp(QtWidgets.QMainWindow):
         self.state['scan_minutes'] = self.s_scan_len.value()
 
         def job(progress, stop):
+            """The background work: scan the video, return the switch boxes found."""
             cap = se.open_video(path)
             fps = cap.get(cv2.CAP_PROP_FPS) or 30
             total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -658,6 +769,10 @@ class LabApp(QtWidgets.QMainWindow):
             return ek.find_switches(bg, pink)
 
         def done(boxes):
+            """When the scan ends: save and show the boxes; warn if fewer than 5 switches were found.
+
+            Input: boxes - the switch boxes found.
+            """
             self.state[f'boxes_{cam}'] = boxes
             self.save()
             self.refresh_switches()
@@ -667,6 +782,7 @@ class LabApp(QtWidgets.QMainWindow):
         self.run_bg(job, done, 'Finding switches', self.sw_bar)
 
     def flip_switches(self):
+        """The "Flip numbering" button: reverse the switch numbers (1..5 becomes 5..1)."""
         cam = self.cur_cam()
         if self.state.get(f'boxes_{cam}'):
             self.state[f'boxes_{cam}'] = self.state[f'boxes_{cam}'][::-1]
@@ -674,11 +790,19 @@ class LabApp(QtWidgets.QMainWindow):
             self.refresh_switches()
 
     def draw_box(self, index):
+        """Let the user drag a box on the frame.
+
+        Input: index - which switch to redraw (0 = switch 1), or None to add a missing switch.
+        """
         self.redraw_index = index
         self.boxview.start_drawing()
         self.info('Drag a box around the switch (include its light).')
 
     def on_box_drawn(self, box):
+        """A box was drawn: replace the chosen switch's box, or add it as a new switch (then renumber), and save.
+
+        Input: box - the new box as [x0, y0, x1, y1] fractions of the frame.
+        """
         cam = self.cur_cam()
         boxes = list(self.state.get(f'boxes_{cam}') or [])
         if self.redraw_index is None:
@@ -692,6 +816,7 @@ class LabApp(QtWidgets.QMainWindow):
         self.refresh_switches()
 
     def remove_switch(self):
+        """The "Remove switch" button: delete the switch whose number is chosen, and save."""
         cam = self.cur_cam()
         boxes = list(self.state.get(f'boxes_{cam}') or [])
         i = self.s_swn.value() - 1
@@ -703,6 +828,10 @@ class LabApp(QtWidgets.QMainWindow):
 
     # ---------- 3. Process ----------
     def page_process(self):
+        """Build page 3, "Process": the status of each video and the Process / Cancel buttons.
+
+        Returns: the page (a QWidget).
+        """
         w = QtWidgets.QWidget()
         v = QtWidgets.QVBoxLayout(w)
         v.addWidget(QtWidgets.QLabel(
@@ -728,6 +857,7 @@ class LabApp(QtWidgets.QMainWindow):
         return w
 
     def refresh_process(self):
+        """Show for each camera whether its video is processed yet (or stopped early, or missing frames)."""
         lines = []
         for cam in ('a', 'b'):
             path = self.state.get(f'cam_{cam}')
@@ -750,6 +880,9 @@ class LabApp(QtWidgets.QMainWindow):
         self.l_proc.setText('<br>'.join(lines) or 'Choose the video(s) on the Session page first.')
 
     def process(self):
+        """The "Process" button: run MediaPipe and the light/touch detection over each video that isn't
+        processed yet (in the background). Switches must be marked first.
+        """
         self.form_to_state()
         if self.sync_missing() or not self.save():
             return
@@ -769,6 +902,7 @@ class LabApp(QtWidgets.QMainWindow):
         out_dir = sa.session_dir(self.state)
 
         def job(progress, stop):
+            """The background work: process each video in turn. Returns: True."""
             for k, (cam, path, boxes) in enumerate(todo):
                 se.process_video(path, boxes, out_dir,
                                  progress=lambda n, tot, left, k=k, cam=cam: progress(
@@ -779,6 +913,7 @@ class LabApp(QtWidgets.QMainWindow):
             return True
 
         def done(_):
+            """When processing ends: refresh the status and drop the old analysis (it will be redone)."""
             self.refresh_process()
             self.session = None
             self.info('Processing finished - go to "Blocks & parts".')
@@ -786,6 +921,11 @@ class LabApp(QtWidgets.QMainWindow):
 
     # ---------- 4. Blocks ----------
     def page_blocks(self):
+        """Build page 4, "Blocks & parts": a table of the groups of lights found (blocks), where the user can
+        set the part and block number of each.
+
+        Returns: the page (a QWidget).
+        """
         w = QtWidgets.QWidget()
         v = QtWidgets.QVBoxLayout(w)
         self.l_blocks = QtWidgets.QLabel()
@@ -807,6 +947,10 @@ class LabApp(QtWidgets.QMainWindow):
         return w
 
     def ensure_session(self):
+        """Make sure the session is loaded and analysed (analyses it if needed).
+
+        Returns: True if there is an analysis to show, False if the videos are not processed yet.
+        """
         if self.session is None or not self.session.ready or self.session.result is None:
             self.load_session()
         if self.session is None or not self.session.ready:
@@ -814,6 +958,9 @@ class LabApp(QtWidgets.QMainWindow):
         return True
 
     def refresh_blocks(self):
+        """Fill the Blocks & parts table: each block's start, number of trials found, end, part and block number,
+        plus the switch order and any warnings.
+        """
         if not self.ensure_session():
             self.l_blocks.setText('Process the video(s) first (step 3).')
             self.t_blocks.setRowCount(0)
@@ -851,6 +998,7 @@ class LabApp(QtWidgets.QMainWindow):
             self.t_blocks.setCellWidget(i, 4, spin)
 
     def apply_parts(self):
+        """The "Apply these parts" button: save the parts chosen in the table, and analyse again with them."""
         n = self.t_blocks.rowCount()
         self.state['parts_override'] = [[self.t_blocks.cellWidget(i, 3).currentText(),
                                          self.t_blocks.cellWidget(i, 4).value()] for i in range(n)]
@@ -860,6 +1008,7 @@ class LabApp(QtWidgets.QMainWindow):
         self.info('Parts applied.')
 
     def reset_parts(self):
+        """The "Back to the session plan" button: forget the user's part changes and analyse again."""
         self.state['parts_override'] = None
         self.save()
         self.session = None
@@ -867,6 +1016,11 @@ class LabApp(QtWidgets.QMainWindow):
 
     # ---------- 5. Trials ----------
     def page_trials(self):
+        """Build page 5, "Trials": the table of all trials (with filters by part / block / sequence), and on the
+        right the selected trial's graph and video frames.
+
+        Returns: the page (a QWidget).
+        """
         w = QtWidgets.QWidget()
         h = QtWidgets.QHBoxLayout(w)
         left = QtWidgets.QVBoxLayout()
@@ -944,6 +1098,7 @@ class LabApp(QtWidgets.QMainWindow):
         return w
 
     def refresh_trials(self):
+        """Refresh the Trials page: analyse if needed, fill the Part / Block / Sequence filter lists, then the table."""
         if not self.ensure_session():
             self.t_trials.setRowCount(0)
             return
@@ -959,6 +1114,9 @@ class LabApp(QtWidgets.QMainWindow):
         self.fill_trials()
 
     def fill_trials(self, *_):
+        """Fill the trials table with the trials that match the filters (or only the marked ones), coloring rows
+        by flag (miss, started before the light, not from home, corrected, light not detected).
+        """
         if self.session is None or self.session.result is None:
             return
         sel = lambda c: None if c.currentText() in ('', 'All') else c.currentText()
@@ -997,15 +1155,25 @@ class LabApp(QtWidgets.QMainWindow):
         t.blockSignals(False)
 
     def on_touse(self, item):
+        """A "touse" box in the table was ticked or unticked: save that choice for the trial.
+
+        Input: item - the table cell that changed.
+        """
         if item.column() != self.t_trials.columnCount() - 1 or item.row() >= len(self.shown_rows):
             return
         self.session.set_touse(self.shown_rows[item.row()], item.checkState() == Qt.Checked)
 
     def current_trial(self):
+        """The trial selected in the table. Returns: its trial row (a dict), or None if none is selected."""
         rows = self.t_trials.selectionModel().selectedRows()
         return self.shown_rows[rows[0].row()] if rows and rows[0].row() < len(self.shown_rows) else None
 
     def plot_trial(self, fig, r):
+        """Draw one trial's graph: speed, x, y or z over time (with light on, movement onset/end and hit
+        marked), or the path of the hand/foot seen from above with the switches.
+
+        Inputs: fig - the figure to draw in; r - the trial row (None = an empty graph).
+        """
         fig.clear()
         ax = fig.add_subplot(111)
         if r is None:
@@ -1059,6 +1227,7 @@ class LabApp(QtWidgets.QMainWindow):
             ax.set_facecolor('0.85')
 
     def show_trial(self):
+        """A trial was selected: draw its graph and show the video frame at its movement onset (or light on)."""
         r = self.current_trial()
         self.plot_trial(self.fig, r)
         self.canvas.draw_idle()
@@ -1066,6 +1235,7 @@ class LabApp(QtWidgets.QMainWindow):
             self.show_video_frame('movement onset' if r.get('onset_s') else 'light on')
 
     def graph_window(self):
+        """The "Open graph in a new window" button: show the selected trial's graph in a bigger, separate window."""
         r = self.current_trial()
         if r is None:
             return
@@ -1079,6 +1249,10 @@ class LabApp(QtWidgets.QMainWindow):
         dlg.show()
 
     def show_video_frame(self, which):
+        """Show a video frame of the selected trial, with the marker (red cross) and the target switch's box.
+
+        Input: which - the moment: 'light on', 'movement onset', 'movement end' or 'trial end'.
+        """
         r = self.current_trial()
         if r is None or r.get('on_frame') is None:
             self.l_frame.clear()
@@ -1120,6 +1294,11 @@ class LabApp(QtWidgets.QMainWindow):
 
     # ---------- 6. Export ----------
     def page_export(self):
+        """Build page 6, "Export": buttons to save this session's CSV + Excel, to make the all-subjects Excel,
+        and to open the results folder.
+
+        Returns: the page (a QWidget).
+        """
         w = QtWidgets.QWidget()
         v = QtWidgets.QVBoxLayout(w)
         v.addWidget(QtWidgets.QLabel(
@@ -1150,6 +1329,7 @@ class LabApp(QtWidgets.QMainWindow):
         return w
 
     def export_session(self):
+        """The "Save this session's CSV + Excel" button: write the session's result files and show links to them."""
         if not self.ensure_session():
             self.error('Process the video(s) first.')
             return
@@ -1157,6 +1337,7 @@ class LabApp(QtWidgets.QMainWindow):
         self.l_export.setText('Saved:<br>' + '<br>'.join(f'<a href="file://{p}">{p}</a>' for p in paths))
 
     def export_all(self):
+        """The "Make the all-subjects Excel" button: combine every saved session into one Excel file."""
         path, n = sa.export_all()
         self.l_export.setText(f'Saved ({n} subjects): <a href="file://{path}">{path}</a>')
 
@@ -1168,6 +1349,10 @@ class BoardCalibrationDialog(QtWidgets.QDialog):
     """The printed ChArUco board filmed by both cameras -> lenses + where camera B is (real units, cm)."""
 
     def __init__(self, parent, state):
+        """Build the board calibration window.
+
+        Inputs: parent - the main window; state - the session's settings (videos and sync offset).
+        """
         super().__init__(parent)
         import calibrate_cameras as cc
         self.cc, self.state, self.saved_path, self.worker = cc, state, None, None
@@ -1234,12 +1419,20 @@ class BoardCalibrationDialog(QtWidgets.QDialog):
         v.addWidget(self.out, 1)
 
     def browse(self, edit):
+        """Let the user choose a separate calibration clip (GoPro: its first chapter is used).
+
+        Input: edit - the text field to fill (clip of camera A or B).
+        """
         p, _ = QtWidgets.QFileDialog.getOpenFileName(self, 'Calibration clip (GoPro: the first chapter)', '',
                                                      'Videos (*.mov *.mp4 *.MOV *.MP4)')
         if p:
             edit.setText(vs.first_chapter(p))
 
     def run(self):
+        """The "Run" button: find the board in both videos (the session videos in the chosen time window,
+        or the separate clips lined up by timecode) and compute the calibration in the background. When done, save
+        it as cameras_board.json in the session folder and show the report.
+        """
         if self.worker is not None and self.worker.isRunning():
             return
         if self.r_session.isChecked():
@@ -1263,9 +1456,14 @@ class BoardCalibrationDialog(QtWidgets.QDialog):
                               f'(offset {off:+.4f} s)...')
 
         def job(progress, stop):
+            """The background work: run the board calibration. Returns: its result (see calibrate_board)."""
             return self.cc.calibrate_board(a, b, off, sq, start, length, ps, progress=progress, should_stop=stop)
 
         def done(res):
+            """When the calibration ends: save it, show the report and PASS / with warnings.
+
+            Input: res - the calibration result.
+            """
             path = os.path.join(sa.session_dir(self.state), 'cameras_board.json')
             os.makedirs(os.path.dirname(path), exist_ok=True)
             self.cc.save_board_calibration(path, res, a, b)
@@ -1283,10 +1481,12 @@ class BoardCalibrationDialog(QtWidgets.QDialog):
         self.worker.start()
 
     def stop(self):
+        """The "Cancel" button: ask the running calibration to stop."""
         if self.worker is not None:
             self.worker.stop_requested = True
 
     def reject(self):
+        """The window is closed: stop the running calibration first."""
         self.stop()
         super().reject()
 
@@ -1295,9 +1495,14 @@ class BoardCalibrationDialog(QtWidgets.QDialog):
 # Two-camera click calibration
 # -----------------------------
 class ClickView(QtWidgets.QLabel):
+    """A video frame the user can click on; the clicked points are drawn as numbered yellow crosses.
+    Sends `clicked` with the point's position in the frame's own pixels.
+    """
+
     clicked = Signal(float, float)
 
     def __init__(self):
+        """Set up an empty picture area with no points."""
         super().__init__()
         self.setAlignment(Qt.AlignCenter)
         self.setMinimumSize(500, 300)
@@ -1305,10 +1510,15 @@ class ClickView(QtWidgets.QLabel):
         self.points = []
 
     def set_image(self, bgr):
+        """Show a new frame (the points stay).
+
+        Input: bgr - the frame.
+        """
         self.img = bgr
         self.redraw()
 
     def redraw(self):
+        """Draw the frame again with the current points, scaled to fit the area."""
         if self.img is None:
             return
         im = self.img.copy()
@@ -1320,10 +1530,14 @@ class ClickView(QtWidgets.QLabel):
         self.setPixmap(to_pixmap(im).scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def resizeEvent(self, e):
+        """When the area changes size, draw the frame again to fit."""
         super().resizeEvent(e)
         self.redraw()
 
     def mousePressEvent(self, e):
+        """A click on the picture: turn the screen position into frame pixels and send it (clicks outside the
+        frame are ignored).
+        """
         if self.img is None or self.pixmap() is None:
             return
         pm = self.pixmap()
@@ -1337,6 +1551,11 @@ class CalibrationDialog(QtWidgets.QDialog):
     """Click the same points in both camera views (same moment) -> where camera B is relative to camera A."""
 
     def __init__(self, parent, state):
+        """Build the click calibration window: the two videos side by side, a slider to choose the moment,
+        and Undo / Compute and save / Close buttons.
+
+        Inputs: parent - the main window; state - the session's settings (both videos and the sync offset).
+        """
         super().__init__(parent)
         self.setWindowTitle('Two-camera calibration - click the same point in A, then in B')
         self.resize(1500, 800)
@@ -1386,6 +1605,9 @@ class CalibrationDialog(QtWidgets.QDialog):
         self.load_frames()
 
     def load_frames(self):
+        """Show both cameras' frames at the moment chosen with the slider (camera B lined up with the sync
+        offset), and note how much each camera moved since its first frame.
+        """
         fa = self.slider.value()
         t = fa / self.fps_a
         fb = int(round((t - self.state.get('offset_s', 0)) * (self.cap_b.get(cv2.CAP_PROP_FPS) or 30)))
@@ -1404,12 +1626,24 @@ class CalibrationDialog(QtWidgets.QDialog):
         self.redraw_points()
 
     def to_first(self, cam, x, y):
+        """A click on the current frame -> the same place in the first frame (undoing camera movement).
+
+        Inputs: cam - 'a' or 'b'; x, y - the click in pixels. Returns: the point in first-frame pixels.
+        """
         return ek.to_first_frame(np.array([x, y]), self.motion[cam])
 
     def to_current(self, cam, p):
+        """A first-frame point -> where it is in the current frame (the opposite of to_first).
+
+        Inputs: cam - 'a' or 'b'; p - the point. Returns: the point in current-frame pixels.
+        """
         return ek.to_frame(p, self.motion[cam])
 
     def on_click(self, cam, x, y):
+        """A click in one of the views: store it as the next point. Clicks must alternate: A, then B, then A ...
+
+        Inputs: cam - 'a' or 'b' (the view clicked); x, y - the click in pixels.
+        """
         want = 'a' if len(self.pts['a']) == len(self.pts['b']) else 'b'
         if cam != want:
             self.l_info.setText(f'Next click goes in {want.upper()}.')
@@ -1418,6 +1652,7 @@ class CalibrationDialog(QtWidgets.QDialog):
         self.redraw_points()
 
     def undo(self):
+        """The "Undo" button: remove the last clicked point."""
         if len(self.pts['a']) > len(self.pts['b']):
             self.pts['a'].pop()
         elif self.pts['b']:
@@ -1425,6 +1660,7 @@ class CalibrationDialog(QtWidgets.QDialog):
         self.redraw_points()
 
     def redraw_points(self):
+        """Draw the clicked points on both views and show how many pairs there are and where to click next."""
         self.va.points = [self.to_current('a', p) for p in self.pts['a']]
         self.vb.points = [self.to_current('b', p) for p in self.pts['b']]
         self.va.redraw()
@@ -1434,6 +1670,9 @@ class CalibrationDialog(QtWidgets.QDialog):
                             'Move the slider to use other moments too (the subject in other positions).')
 
     def compute(self):
+        """The "Compute and save" button: compute where camera B is relative to camera A from the clicked pairs
+        (at least 8), save cameras.json in the session folder, and show how well the points fit.
+        """
         n = len(self.pts['b'])
         if n < 8:
             QtWidgets.QMessageBox.warning(self, 'Calibration', f'{n} pairs - need at least 8.')
@@ -1459,6 +1698,7 @@ class CalibrationDialog(QtWidgets.QDialog):
 
 
 def main():
+    """Start the Lab App: open the main window and run until it is closed."""
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName('Reaching Lab')
     win = LabApp()
