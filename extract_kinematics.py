@@ -62,6 +62,14 @@ SCAN_SCALE = 0.5            # the scan works on a half-size copy
 SCAN_PER_S = 4              # frames per second checked for pink light
 SCAN_BACKGROUND_FRAMES = 20  # frames in the median background
 SWITCH_BOX_PAD = 0.1        # found boxes are enlarged by 10% of their size on each side
+# GoPro 4K in a bright room: the LED is a small dot (a few pixels after the half-size scan, lit only part of the
+# time), so its share of the area around a switch stays far below 0.5%. A shape-checked switch candidate with
+# at least this many pixels where pink light was seen at least once also counts as lit.
+MIN_LIT_PIXELS = 5
+# Pinkish glow of the LED on the white table: red only 20-40 above green/blue, and its size changes a lot from
+# one light to the next (10x in GoPro videos), which hid the smaller lights. The LED dot itself is 80-115 above.
+# Only the part of each pixel's red excess above this level is counted as light.
+GLOW_EXCESS = 40
 
 
 def _disk(d):
@@ -202,17 +210,24 @@ def find_switches(background, pink_frac):
     boxes = switch_candidates(background, 1.0) + switch_candidates(background, 0.5)
 
     def light(box):  # share of the area around the switch where its pink LED/glow appeared
-        """Score a candidate box by its light: the share of the area around it where pink LED light was seen.
+        """Score a candidate box by its light: (share of the area around it where pink LED light was seen
+        often, number of pixels there where it was seen at least once).
 
-        Input: box - [x0, y0, x1, y1] in pixels. Returns: a number from 0 (never lit) to 1.
+        Input: box - [x0, y0, x1, y1] in pixels. Returns: (a number from 0 (never lit) to 1, a pixel count).
         """
         x0, y0, x1, y1 = box
         bw, bh = x1 - x0, y1 - y0
-        return float((pink_frac[max(0, y0 - bh):y1 + bh, max(0, x0 - bw):x1 + bw] > 0.02).mean())
+        around = pink_frac[max(0, y0 - bh):y1 + bh, max(0, x0 - bw):x1 + bw]
+        return float((around > 0.02).mean()), int((around > 0).sum())
+
+    def lit(box):
+        """True if light was seen around the box: a large glow (phone videos) or a small LED dot (GoPro)."""
+        share, pixels = light(box)
+        return share > 0.005 or pixels >= MIN_LIT_PIXELS
 
     kept = []
     for box in sorted(boxes, key=light, reverse=True):
-        if light(box) > 0.005 and all(_overlap(box, k) <= 0.3 for k in kept):
+        if lit(box) and all(_overlap(box, k) <= 0.3 for k in kept):
             kept.append(box)
     kept = kept[:N_SWITCHES]
     fracs = []
@@ -334,7 +349,8 @@ class CameraMotion:
 
 
 def light_energy(frame, corners):
-    """Amount of pink LED light (the LED and its glow) inside the polygon's bounding box, per pixel.
+    """Amount of pink LED light inside the polygon's bounding box, per pixel: the red excess of the pink pixels
+    above GLOW_EXCESS (so the LED itself counts, and its faint, changing glow on the table hardly does).
 
     The pink test (_pink) leaves out the deep-red mushroom button (low green/blue), the white table (R = G = B)
     and skin (orange: blue well below green), which all sit in or near the box."""
@@ -344,7 +360,8 @@ def light_energy(frame, corners):
     if x1 - x0 < 2 or y1 - y0 < 2:
         return 0.0
     pink, excess = _pink(frame[y0:y1, x0:x1])
-    return float(excess[pink].sum(dtype=np.int64)) * 100 / ((x1 - x0) * (y1 - y0))
+    bright = np.maximum(excess[pink].astype(np.int32) - GLOW_EXCESS, 0)
+    return float(bright.sum(dtype=np.int64)) * 100 / ((x1 - x0) * (y1 - y0))
 
 
 def otsu_threshold(values):

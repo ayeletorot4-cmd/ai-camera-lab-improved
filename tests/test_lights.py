@@ -26,8 +26,11 @@ class LightEnergy(unittest.TestCase):
         f = self.frame()
         box = np.float32([[100, 50], [200, 50], [200, 150], [100, 150]])
         self.assertEqual(ek.light_energy(f, box), 0.0)
-        f[60:70, 110:130] = PINK                         # 200 px, excess = 255 - 200 = 55
-        self.assertAlmostEqual(ek.light_energy(f, box), 200 * 55 * 100 / (100 * 100))
+        f[60:70, 110:130] = PINK                         # 200 px, excess = 255 - 200 = 55, above the glow 15
+        self.assertAlmostEqual(ek.light_energy(f, box), 200 * (55 - ek.GLOW_EXCESS) * 100 / (100 * 100))
+        g = self.frame()
+        g[60:70, 110:130] = (225, 225, 255)              # faint glow on the table: excess 30, not counted
+        self.assertEqual(ek.light_energy(g, box), 0.0)
         for colour in (DEEP_RED, WHITE, SKIN):
             g = self.frame()
             g[60:90, 110:150] = colour
@@ -39,7 +42,7 @@ class LightEnergy(unittest.TestCase):
         # A rotated quad: its bounding box is measured
         quad = np.float32([[5, -20], [40, 5], [5, 30], [-30, 5]])
         x0, y0, x1, y1 = 0, 0, 40, 30                    # clipped to the frame
-        self.assertAlmostEqual(ek.light_energy(f, quad), 100 * 55 * 100 / ((x1 - x0) * (y1 - y0)))
+        self.assertAlmostEqual(ek.light_energy(f, quad), 100 * (55 - ek.GLOW_EXCESS) * 100 / ((x1 - x0) * (y1 - y0)))
         # Outside the frame / too small -> 0
         self.assertEqual(ek.light_energy(f, np.float32([[400, 400], [500, 400], [500, 500], [400, 500]])), 0.0)
         self.assertEqual(ek.light_energy(f, np.float32([[2, 2], [3, 2], [3, 3], [2, 3]])), 0.0)

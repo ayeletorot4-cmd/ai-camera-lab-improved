@@ -28,7 +28,7 @@ def synthetic_frame(i, texture):
     i % 32 is set, its brightness changes every 32 frames - so each frame's light levels tell which frame it is."""
     f = texture.copy()
     w, h = SIZE
-    level = 110 + 20 * ((i // 32) % 6)                     # green / blue of the pink: 110..210
+    level = 100 + 15 * ((i // 32) % 6)                     # green / blue of the pink: 100..175 (above the glow)
     for s, (x0, y0, x1, y1) in enumerate(BOXES):
         if (i % 32) >> s & 1:
             c = (int((x0 + x1) / 2 * w), int((y0 + y1) / 2 * h))
