@@ -35,7 +35,8 @@ def default_state(subject='S01', session='d1'):
     return dict(subject=subject, session=session, cam_a='', cam_b='', offset_s=0.0, calibration='',
                 boxes_a=None, boxes_b=None,
                 design=dict(tested_side='right', contralateral=False, practice_limb='upper',
-                            practice_side='right', retest=session != 'd1'),
+                            practice_side='right', familiarization_limb=None, familiarization_side=None,
+                            retest=session != 'd1'),
                 settings=asdict(ed.Settings()), parts_override=None, touse_override={},
                 scan_start_s=0.0, scan_minutes=5.0)
 
@@ -78,7 +79,7 @@ def template_of(state):
     """
     d = state['design']
     return ed.session_template(d['tested_side'], d['contralateral'], d['practice_limb'], d['practice_side'],
-                               d.get('retest', False))
+                               d.get('retest', False), d.get('familiarization_limb'), d.get('familiarization_side'))
 
 
 def settings_of(state):

@@ -60,6 +60,11 @@ class Template(unittest.TestCase):
         self.assertEqual([p.name for p in t], ['Familiarization', 'pre_test', 'pre_test_contralateral', 'practice',
                                                'post_test', 'post_test_contralateral'])
         self.assertEqual((t[2].side, t[3].limb, t[3].side), ('right', 'lower', 'left'))
+        self.assertEqual((t[0].limb, t[0].side), ('lower', 'left'))          # familiarization: as practice
+        t = ed.session_template('right', practice_limb='lower', familiarization_limb='upper')
+        self.assertEqual([(p.name, p.limb, p.side) for p in t],
+                         [('Familiarization', 'upper', 'right'), ('pre_test', 'upper', 'right'),
+                          ('practice', 'lower', 'right'), ('post_test', 'upper', 'right')])
         self.assertEqual([p.name for p in ed.session_template(retest=True, contralateral=True)],
                          ['re_test', 're_test_contralateral'])
 

@@ -396,6 +396,11 @@ class LabApp(QtWidgets.QMainWindow):
         self.c_plimb.addItems(['upper', 'lower'])
         self.c_pside = QtWidgets.QComboBox()
         self.c_pside.addItems(['right', 'left'])
+        # Familiarization limb/side: 'as practice' (saved as None) or its own, e.g. hand while practice is with the foot
+        self.c_flimb = QtWidgets.QComboBox()
+        self.c_flimb.addItems(['as practice', 'upper', 'lower'])
+        self.c_fside = QtWidgets.QComboBox()
+        self.c_fside.addItems(['as practice', 'right', 'left'])
         f.addRow('Tested arm (pre / post / re-test)', self.c_tested)
         f.addRow('', self.k_contra)
         prow = QtWidgets.QHBoxLayout()
@@ -404,11 +409,18 @@ class LabApp(QtWidgets.QMainWindow):
         prow.addWidget(QtWidgets.QLabel('side'))
         prow.addWidget(self.c_pside)
         prow.addStretch()
-        f.addRow('Practice (and familiarization)', prow)
+        f.addRow('Practice', prow)
+        frow = QtWidgets.QHBoxLayout()
+        frow.addWidget(QtWidgets.QLabel('limb'))
+        frow.addWidget(self.c_flimb)
+        frow.addWidget(QtWidgets.QLabel('side'))
+        frow.addWidget(self.c_fside)
+        frow.addStretch()
+        f.addRow('Familiarization', frow)
         self.l_plan = QtWidgets.QLabel()
         self.l_plan.setWordWrap(True)
         f.addRow('Session plan', self.l_plan)
-        for wdg in (self.c_tested, self.c_plimb, self.c_pside, self.c_session):
+        for wdg in (self.c_tested, self.c_plimb, self.c_pside, self.c_flimb, self.c_fside, self.c_session):
             wdg.currentIndexChanged.connect(self.update_plan)
         self.k_contra.toggled.connect(self.update_plan)
         v.addWidget(group('Experimental design', f))
@@ -549,6 +561,8 @@ class LabApp(QtWidgets.QMainWindow):
         self.k_contra.setChecked(d['contralateral'])
         self.c_plimb.setCurrentText(d['practice_limb'])
         self.c_pside.setCurrentText(d['practice_side'])
+        self.c_flimb.setCurrentText(d.get('familiarization_limb') or 'as practice')
+        self.c_fside.setCurrentText(d.get('familiarization_side') or 'as practice')
         st = s['settings']
         self.s_tps.setValue(st['trials_per_sequence'])
         self.s_spb.setValue(st['sequences_per_block'])
@@ -580,8 +594,10 @@ class LabApp(QtWidgets.QMainWindow):
         if not s['cam_b']:
             s['offset_s'] = 0.0
         s['calibration'] = self.e_calib.text().strip()
+        own = lambda c: None if c.currentIndex() == 0 else c.currentText()  # 'as practice' -> None
         s['design'] = dict(tested_side=self.c_tested.currentText(), contralateral=self.k_contra.isChecked(),
                            practice_limb=self.c_plimb.currentText(), practice_side=self.c_pside.currentText(),
+                           familiarization_limb=own(self.c_flimb), familiarization_side=own(self.c_fside),
                            retest=s['session'] != 'd1')
         try:
             pattern = ed.parse_pattern(self.e_pattern.text())

@@ -55,15 +55,19 @@ class Part:
 
 
 def session_template(tested_side='right', contralateral=False, practice_limb='upper', practice_side=None,
-                     retest=False):
-    """The parts of a session in order (the user can edit them)."""
+                     retest=False, familiarization_limb=None, familiarization_side=None):
+    """The parts of a session in order (the user can edit them).
+    familiarization_limb / familiarization_side: the limb and side of the familiarization blocks when they differ
+    from the practice (e.g. familiarization with the right hand, practice with the right foot); None = as practice."""
     other = 'left' if tested_side == 'right' else 'right'
     practice_side = practice_side or tested_side
+    familiarization_limb = familiarization_limb or practice_limb
+    familiarization_side = familiarization_side or practice_side
     test = lambda name: [Part(name, 3, 'upper', tested_side)] + (
         [Part(f'{name}_contralateral', 3, 'upper', other)] if contralateral else [])
     if retest:
         return test('re_test')
-    return ([Part('Familiarization', 2, practice_limb, practice_side)] + test('pre_test')
+    return ([Part('Familiarization', 2, familiarization_limb, familiarization_side)] + test('pre_test')
             + [Part('practice', 10, practice_limb, practice_side)] + test('post_test'))
 
 
